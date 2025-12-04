@@ -11,7 +11,7 @@ class MooringReader:
 
     def __init__(self, lake, location, year, date, bathy_file, datalakes=False):
         """
-        Initialized MooringReader object.
+        Initialize MooringReader object.
 
         Parameters
         ----------

@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=78", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ewgreaders"
+version = "1.0.0"
+description = "Process, read, and analyze Eawag aquatic physics data"
+authors = [{name="Haydn Herrema", email="haydn.herrema@eawag.ch"}]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []

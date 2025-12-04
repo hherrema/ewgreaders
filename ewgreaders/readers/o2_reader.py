@@ -108,29 +108,9 @@ class O2Reader(MooringReader):
             Dataset of data recorded by oxygen logger.
         """
         if self.sensor == 'minidot':
-            with open(self.fpath, 'r') as f:
-                lines = [x[:-1] for x in f if len(x.split(',')) > 1]
-
-            # extract colum names
-            cols = [x.lstrip(' ') for x in lines[0].split(',')]
-
-            data = []
-            for line in lines[2:]:
-                data.append([x.lstrip(' ') for x in line.split(',')])
-            data = pd.DataFrame(data, columns=cols)
-
-            data = data.drop(self.COLS_DROP_MINIDOT, axis=1)
-            data = data.rename(columns=self.COLS_MAP_MINIDOT)
-            data['time'] = pd.to_datetime(data['time'])
-            data['temp'] = data['temp'].astype(float)
-            data['d_oxygen'] = data['d_oxygen'].astype(float)
-            data['d_oxygen_sat'] = data['d_oxygen_sat'].astype(float)
+            data = self.parse_minidot_L0()
         elif self.sensor == 'rbr_do':
-            with rsk.RSK(self.fpath) as f:
-                f.readdata()
-                data = pd.DataFrame(f.data)
-
-            data = data.rename(columns=self.COLS_MAP_RBR_DO)
+            data = self.parse_RBR_DO_L0()
         else:
             raise NotImplementedError("Only minidot and rbr_do sensors are handled.")
         
@@ -139,3 +119,51 @@ class O2Reader(MooringReader):
         ds = ds.assign_coords(depth=self.depth, serial_id=self.serial_id)
 
         return ds
+    
+    
+    def parse_minidot_L0(self):
+        """
+        Parse raw (L0) data from Minidot oxygen logger.
+
+        Returns
+        -------
+        data : pd.DataFrame
+            Data from Minidot oxygen logger.
+        """
+        with open(self.fpath, 'r') as f:
+                lines = [x[:-1] for x in f if len(x.split(',')) > 1]
+
+        # extract colum names
+        cols = [x.lstrip(' ') for x in lines[0].split(',')]
+
+        data = []
+        for line in lines[2:]:
+            data.append([x.lstrip(' ') for x in line.split(',')])
+        data = pd.DataFrame(data, columns=cols)
+
+        data = data.drop(self.COLS_DROP_MINIDOT, axis=1)
+        data = data.rename(columns=self.COLS_MAP_MINIDOT)
+        data['time'] = pd.to_datetime(data['time'])
+        data['temp'] = data['temp'].astype(float)
+        data['d_oxygen'] = data['d_oxygen'].astype(float)
+        data['d_oxygen_sat'] = data['d_oxygen_sat'].astype(float)
+
+        return data
+    
+
+    def parse_RBR_DO_L0(self):
+        """
+        Parse raw (L0) data from RBR_DO oxygen logger.
+
+        Returns
+        -------
+        data : pd.DataFrame
+            Data from RBR_DO oxygen logger.
+        """
+        with rsk.RSK(self.fpath) as f:
+            f.readdata()
+            data = pd.DataFrame(f.data)
+
+        data = data.rename(columns=self.COLS_MAP_RBR_DO)
+
+        return data
