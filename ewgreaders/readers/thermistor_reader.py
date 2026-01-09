@@ -2,6 +2,7 @@
 
 # imports
 import json
+from glob import glob
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -11,10 +12,9 @@ from .mooring_reader import MooringReader
 
 
 class ThermistorReader(MooringReader):
-    THERMISTORS = ['rbr_temp', 'rbr_duet']
     COLS_MAP = {'timestamp': 'time', 'temperature': 'temp'}
 
-    def __init__(self, serial_id, lake, location, year, date, bathy_file, datalakes=False):
+    def __init__(self, serial_id, lake, location, year, date, datalakes=False):
         """
         Initialize ThermistorReader object.
 
@@ -30,14 +30,34 @@ class ThermistorReader(MooringReader):
             Year of thermistor retrieval. 
         date : str
             Date (YYYYMMDD) of thermistor retrieval.
-        bathy_file : str
-            File path to bathymetry data.
         datalakes : bool
             Toggle whether to read from Eawag drive or DataLakes.
         """
-        super.__init__(lake, location, year, date, bathy_file, datalakes)
+        super().__init__(lake, location, year, date, datalakes)
         self.serial_id = serial_id
 
+        self.fpath_L0 = self.locate_data_file('L0')
+        self.sensor = self.get_sensor_type()
+        self.mab = self.get_mab()
+        self.depth = self.set_depth()
+    
+
+    def get_sensor_type(self):
+        """
+        Parse metadata file for sensor type.
+
+        Returns
+        -------
+        sensor : str
+            Type of thermistor.
+        """
+        instruments = self.md['instruments']
+        for i in instruments:
+            if i['serial_id'] == self.serial_id and i['instrument'] in self.THERMISTORS:
+                return i['instrument']
+            
+        raise ValueError(f'{self.serial_id} sensor not found')
+    
 
     def get_mab(self):
         """
@@ -48,15 +68,12 @@ class ThermistorReader(MooringReader):
         mab : float
             Meters above bottom for thermistor.
         """
-        with open(self.md_file, 'r') as f:
-            md = json.load(f)
-
-        instruments = md['instruments']
+        instruments = self.md['instruments']
         for i in instruments:
             if i['serial_id'] == self.serial_id and i['instrument'] in self.THERMISTORS:
                 return i['mab']
             
-        return np.nan
+        raise ValueError(f'{self.serial_id} meters above bottom not found.')
     
 
     def set_depth(self):
@@ -69,27 +86,35 @@ class ThermistorReader(MooringReader):
             Depth below water surface of thermistor.
         """
         return self.total_depth - self.mab
-    
 
-    def get_sensor_type(self):
+
+    def locate_data_file(self, level):
         """
-        Parse metadata file for sensor type.
+        Locate file with thermistor data.
+
+        Parameters
+        ----------
+        level : str
+            Level of data.
 
         Returns
         -------
-        sensor : str
-            Type of thermistor.
+        fpath : str
+            Path to data file.
         """
-        with open(self.md_file, 'r') as f:
-            md = json.load(f)
-
-        instruments = md['instruments']
-        for i in instruments:
-            if i['serial_id'] == self.serial_id and i['instrument'] in self.THERMISTORS:
-                return i['instrument']
-            
-        return None
-
+        if level == 'L0':
+            fpaths = glob(f'{self.dpath_L0}/*{self.serial_id}*.rsk')
+        elif level == 'L1':
+            raise NotImplementedError
+        elif level == 'L2':
+            raise NotImplementedError
+        else:
+            raise ValueError("Data level must be L0, L1, or L2.")
+        
+        if len(fpaths) != 1:
+            raise IndexError(f'Could not find single data file for {self.serial_id}.')
+        
+        return fpaths[0]
     
 
     def load_from_L0(self):
@@ -102,7 +127,7 @@ class ThermistorReader(MooringReader):
             Dataset of data recorded by thermistor.
         """
         if self.sensor in  ['rbr_temp', 'rbr_duet']:
-            with rsk.RSK(self.fpath) as f:
+            with rsk.RSK(self.fpath_L0) as f:
                 f.readdata()
                 data = pd.DataFrame(f.data)
 

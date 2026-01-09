@@ -37,7 +37,7 @@ class CTDReader(ProfileReader):
     }
 
 
-    def __init__(self, serial_id, lake, year, date, bathy_file, datalakes=False):
+    def __init__(self, serial_id, lake, year, date, fpath, datalakes=False):
         """
         Initialize CTDReader object.
 
@@ -51,12 +51,12 @@ class CTDReader(ProfileReader):
             Year of CTD profiles. 
         date : str
             Date (YYYYMMDD) of CTD profiles.
-        bathy_file : str
-            File path to bathymetry data.
+        fpath : str
+            File path to profile.
         datalakes : bool
             Toggle whether to read from Eawag drive or DataLakes.
         """
-        super.__init__(lake, year, date, bathy_file, datalakes)
+        super().__init__(lake, year, date, fpath, datalakes)
         self.serial_id = serial_id
 
 
@@ -131,8 +131,10 @@ class CTDReader(ProfileReader):
         ds : xr.Dataset
             Dataset of data recorded by CTD.
         """
+        if os.path.basename(os.path.dirname(self.fpath)) != 'L0':
+            raise ValueError('Path does not point to L0 file.')
+        
         brand = self.SID_BRAND_MAP[self.serial_id]
-
         if brand == 'Sea&Sun':
             data = self.parse_sea_and_sun_L0()
         elif brand == 'RBR':
@@ -194,3 +196,35 @@ class CTDReader(ProfileReader):
         Parse raw (L0) data from RBR CTD.
         """
         raise NotImplementedError
+    
+
+    # ---------- Reading ----------
+
+    def load_from_L1(self):
+        """
+        Load processed (L1) CTD data into xarray Dataset.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            Processed (L1) CTD data.
+        """
+        if os.path.basename(os.path.dirname(self.fpath)) != 'L1':
+            raise ValueError('Path does not point to L1 file.')
+        
+        return xr.open_dataset(self.fpath)
+    
+
+    def load_from_L2(self):
+        """
+        Load processed (L2) CTD data into xarray Dataset.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            Processed (L2) CTD data.
+        """
+        if os.path.basename(os.path.dirname(self.fpath)) != 'L2':
+            raise ValueError('Path does not point to L2 file.')
+        
+        return xr.open_dataset(self.fpath)

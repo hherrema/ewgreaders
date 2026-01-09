@@ -2,11 +2,13 @@
 
 # imports
 import gsw as sw
+import xarray as xr
 
 
 class ProfileReader:
+    BATHY_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/bathymetry.nc'
 
-    def __init__(self, lake, year, date, bathy_file, datalakes=False):
+    def __init__(self, lake, year, date, fpath, datalakes=False):
         """
         Initialize ProfileReader object.
 
@@ -18,16 +20,30 @@ class ProfileReader:
             Year of profile. 
         date : str
             Date (YYYYMMDD) of profile.
-        bathy_file : str
-            File path to bathymetry data.
+        fpath : str
+            File path to profile.
         datalakes : bool
             Toggle whether to read from Eawag drive or DataLakes.
         """
         self.lake = lake
         self.year = year
         self.date = date
-        self.bathy_file = bathy_file
+        self.fpath = fpath
         self.datalakes = datalakes
+
+    
+    # ---------- Utility ----------
+    def load_bathymetry(self):
+        """
+        Load lake bathymetry data.
+
+        Returns
+        -------
+        bathy : xr.Dataset
+            Lake bathymetry.
+        """
+        return xr.open_dataset(self.BATHY_PATH.format(lake=self.lake))
+
 
 
     def calculate_depth(pressure, air_pressure, rho, lat):

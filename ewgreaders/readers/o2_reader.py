@@ -11,7 +11,6 @@ from .mooring_reader import MooringReader
 
 
 class O2Reader(MooringReader):
-    OXYGEN_LOGGERS = ['minidot', 'rbr_do']
     COLS_DROP_MINIDOT = ['Unix Timestamp', 'Coordinated Universal Time', 'Battery', 'Q']
     COLS_MAP_MINIDOT = {
         'UTC_Date_&_Time': 'time', 
@@ -21,7 +20,7 @@ class O2Reader(MooringReader):
     }
     COLS_MAP_RBR_DO = {'timestamp': 'time', 'dissolved_o2_saturation': 'd_oxygen_sat'}
     
-    def __init__(self, serial_id, lake, location, year, date, bathy_file, datalakes=False):
+    def __init__(self, serial_id, lake, location, year, date, datalakes=False):
         """
         Initialize O2Reader object.
 
@@ -37,12 +36,10 @@ class O2Reader(MooringReader):
             Year of oxygen logger retrieval. 
         date : str
             Date (YYYYMMDD) of oxygen logger retrieval.
-        bathy_file : str
-            File path to bathymetry data.
         datalakes : bool
             Toggle whether to read from Eawag drive or DataLakes.
         """
-        super.__init__(lake, location, year, date, bathy_file, datalakes)
+        super().__init__(lake, location, year, date, datalakes)
         self.serial_id = serial_id
 
 
@@ -55,10 +52,7 @@ class O2Reader(MooringReader):
         mab : float
             Meters above bottom for oxygen logger.
         """
-        with open(self.md_file, 'r') as f:
-            md = json.load(f)
-
-        instruments = md['instruments']
+        instruments = self.md['instruments']
         for i in instruments:
             if i['serial_id'] == self.serial_id and i['instrument'] in self.OXYGEN_LOGGERS:
                 return i['mab']
@@ -87,10 +81,7 @@ class O2Reader(MooringReader):
         sensor : str
             Type of oxygen logger.
         """
-        with open(self.md_file, 'r') as f:
-            md = json.load(f)
-
-        instruments = md['instruments']
+        instruments = self.md['instruments']
         for i in instruments:
             if i['serial_id'] == self.serial_id and i['instrument'] in self.OXYGEN_LOGGERS:
                 return i['instrument']
