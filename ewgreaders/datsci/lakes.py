@@ -3,41 +3,142 @@
 # imports
 import xarray as xr
 import numpy as np
+import pandas as pd
 import scipy
 import math
 
+import signal
+
 
 # ---------- Utility ---------- #
-def rolling_average(data, depth, ra_window):
+
+def contiguous_unidirectional_flow(ds, depth, angle_deg):
     """
-    Compute rolling average.
+    Determine start and end of contiguous flows in the same direction.
 
     Parameters
     ----------
-    data : array_like
-        Data variable to compute rolling average of.
-    depth : array_like
-        Depth below water surface.
-    ra_window : float
-        Depth window for rolling average.
+    ds : xr.Dataset
+        ADCP data.
+    depth : float
+        Depth of ADCP bin.
+    angle_deg : float
+        Angle of interface in degrees.  0° indicates E-W interface.  90° indicates N-S interface.
 
     Returns
     -------
-    data_ra : np.array
-        Rolling average of data.
+    cuf : pd.DataFrame
+        Direction, start and end indices/times, and duration of each contiguous unidirectional flow.
+    vel : xr.DataArray
+        Velocity timeseries at specified depth and angle.
     """
-    data_ra = []
-    for d in depth:
-        mask = (depth >= d - (ra_window/2)) & (depth <= d + (ra_window/2))
-        data_ra.append(np.mean(data[mask]))
+    if angle_deg < -90 or angle_deg >= 90:
+        raise ValueError("Interface angle must be in range [-90°, 90°)")
+    
+    angle_rad = np.deg2rad(angle_deg)
+    u = ds.vel.sel(dir='E').sel(range=depth, method='nearest')
+    v = ds.vel.sel(dir='N').sel(range=depth, method='nearest')
+    u_orth = u * (-1) * np.sin(angle_rad)
+    v_orth = v * np.cos(angle_rad)
+    vel = u_orth + v_orth
+    depth = vel['range'].item()
 
-    return np.array(data_ra)
+    i = 0
+    cuf = []
+    while i < len(vel):
+        # nortward flow
+        if vel[i].item() > 0:
+            j = i
+
+            # contiguous N-ward flow
+            while j < len(vel) and vel[j].item() > 0:
+                j += 1
+
+            # only flows greater than a single measurement
+            if j > i+1:
+                v_sel = vel.isel(time=slice(i, j))
+                time_s = (v_sel.time - v_sel.time[0]).astype('timedelta64[s]').astype(float)
+                duration = time_s[-1].item() - time_s[0].item()
+                cuf.append({
+                    'direction': 'N',
+                    'depth': depth,
+                    'angle_deg': angle_deg,
+                    'idx_start': i,
+                    'idx_end': j,
+                    't_start': v_sel.time.values[0],
+                    't_end': v_sel.time.values[-1],
+                    'duration': duration
+                })
+
+            i = j
+
+        # southward flow
+        elif vel[i].item() < 0:
+            j = i
+
+            # contiguous S-ward flow
+            while j < len(vel) and vel[j].item() < 0:
+                j += 1
+
+            # only flows greater than a single measurement
+            if j > i+1:
+                v_sel = vel.isel(time=slice(i, j))
+                time_s = (v_sel.time - v_sel.time[0]).astype('timedelta64[s]').astype(float)
+                duration = time_s[-1].item() - time_s[0].item()
+                cuf.append({
+                    'direction': 'S',
+                    'depth': depth,
+                    'angle_deg': angle_deg,
+                    'idx_start': i,
+                    'idx_end': j,
+                    't_start': v_sel.time.values[0],
+                    't_end': v_sel.time.values[-1],
+                    'duration': duration
+                })
+
+            i = j
+
+        else:
+            i += 1
+    
+    return pd.DataFrame(cuf), vel
 
 
 # ---------- CTD ---------- #
 
+def mixed_layer_depth(ds, thresh=0.01):
+    """
+    Locate depth of mixed layer from surface.
 
-def locate_thermocline(ds, ra_window=1):
+    Parameters
+    ----------
+    ds : xr.Dataset
+        CTD data.
+    thresh : float
+        Density difference from surface density that defines end of mixed layer.
+
+    Returns
+    -------
+    mld : float
+        Mixed layer depth.
+    """
+    # mask for valid depths, quality checked temperature and conductivity (salinity)
+    mask = (ds['depth'].notnull()) & (ds['Temp_qual'] == 0) & (ds['Cond_qual'] == 0)
+    depth = ds['depth'][mask]
+    rho = ds['rho'][mask]
+
+    try:
+        idx = np.where(rho > rho.values[0] + thresh)[0][0]
+        mld = depth[idx].item()
+
+    # fully mixed returns maximum depth
+    except IndexError:
+        mld = depth.max().item()
+    
+    return mld
+
+
+def thermocline(ds, ra_window=1):
     """
     Locate thermocline, defined as maximum vertical temperature gradient.
 
@@ -69,7 +170,7 @@ def locate_thermocline(ds, ra_window=1):
     return thermocline_depth
 
 
-def locate_epi_meta_hypolimnion(ds):
+def epi_meta_hypolimnion(ds):
     """
     Locate epilimnion, metalimnion, and hypolimnion regions, based on temperature profile.
 
@@ -90,7 +191,77 @@ def locate_epi_meta_hypolimnion(ds):
     raise NotImplementedError
 
 
-def calculate_transect_min_dox(datasets):
+def isotherm(ds, iso_t):
+    """
+    Locate isotherm depth.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Single profile CTD data.
+    iso_t : float
+        Isotherm temperature.
+
+    Returns
+    -------
+    iso_z : float
+        Isotherm depth.
+    """
+    # mask for valid depths, quality checked temperature
+    mask = (ds['depth'].notnull()) & (ds['Temp_qual'] == 0)
+    depth = ds['depth'][mask]
+    temp = ds['Temp'][mask]
+
+    # locate shallowest crossing of isotherm temperature
+    try:
+        idxl = np.where(temp < iso_t)[0][0]
+        idxu = np.where(temp > iso_t)[0][-1]
+        idx = round((idxl + idxu)/2)
+        iso_z = depth[idx].item()
+    
+    # temperature outside of range of observed values
+    except IndexError:
+        iso_z = np.nan
+
+    return iso_z
+
+
+def isopycnal(ds, iso_rho):
+    """
+    Locate isopycnal depth.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Single profile CTD data.
+    iso_rho : float
+        Isopycnal density.
+
+    Returns
+    -------
+    iso_z : float
+        Isopycnal depth.
+    """
+    # mask for valid depths, quality checked temperature and conductivity (salinity)
+    mask = (ds['depth'].notnull()) & (ds['Temp_qual'] == 0) & (ds['Cond_qual'] == 0)
+    depth = ds['depth'][mask]
+    rho = ds['rho'][mask]
+
+    # locate shallowest crossing of isopycnal temperature
+    try:
+        idxl = np.where(rho > iso_rho)[0][0]
+        idxu = np.where(rho < iso_rho)[0][-1]
+        idx = round((idxl + idxu)/2)
+        iso_z = depth[idx].item()
+
+    # density outside of range of observed values
+    except IndexError:
+        iso_z = np.nan
+
+    return iso_z
+
+
+def transect_min_dox(datasets):
     """
     Calculate minimum dissolved oxygen concentration across profiles from same transect.
 
@@ -133,7 +304,7 @@ def calculate_transect_min_dox(datasets):
     return min_dox, min_dox_depth, max_transect_depth
 
 
-def locate_anoxia(ds, epsilon=0.05, transect_min_dox=None):
+def anoxia(ds, epsilon=0.05, transect_min_dox=None):
     """
     Locate start of anoxic zone.
 
@@ -215,11 +386,11 @@ def locate_interface_bounds(depth, mxsc, mysc, angle_rad, bathy):
     xsc1 : float
         x Swiss coordinate of boundary 1.
     ysc1 : float
-        y Swiss coordiate of boundary 1.
+        y Swiss coordinate of boundary 1.
     xsc2 : float
         x Swiss coordinate of boundary 2.
     ysc2 : float
-        y Swiss coordiate of boundary 2.
+        y Swiss coordinate of boundary 2.
     distance : float
         Distance between boundary points.
 
@@ -254,9 +425,9 @@ def locate_interface_bounds(depth, mxsc, mysc, angle_rad, bathy):
     return xsc1, ysc1, xsc2, ysc2, distance
 
 
-def calculate_flux(ds, depth, mxsc, mysc, angle_deg, bathy):
+def volume_flux(ds, depth, mxsc, mysc, angle_deg, bathy):
     """
-    Calculate flux from ADCP velocity data.
+    Calculate volumne flux from ADCP velocity data.
 
     Parameters
     ----------
@@ -298,7 +469,27 @@ def calculate_flux(ds, depth, mxsc, mysc, angle_deg, bathy):
     return flux.rename('flux')
 
 
-def calculate_flow_angle(ds):
+def net_volume_transport(ds_flux):
+    """
+    Calculate net volume transport as integral of volume flux timeseries.
+
+    Parameters
+    ----------
+    ds_flux : xr.DataArray
+        Volume flux timeseries [m^3/s].
+
+    Returns
+    -------
+    transport : xr.DataArray
+        Net volume transport [m^3].
+    """
+    time_s = (ds_flux.time - ds_flux.time[0]).astype('timedelta64[s]').astype(float)
+    transport = ds_flux.assign_coords(time=time_s).fillna(0).integrate('time')
+
+    return transport.rename('transport')
+
+
+def flow_angle(ds):
     """
     Calculate angle of flow from ADCP velocity data.
     Map {'E', 'N', 'W', 'S'} to angles {0°, 90°, 180°, 270°}.
@@ -310,18 +501,18 @@ def calculate_flow_angle(ds):
 
     Returns
     -------
-    flow_angle : xr.DataArray
+    flow_ang : xr.DataArray
         Flow angle timeseries [°].
     """
     u = ds.vel.sel(dir='E')
     v = ds.vel.sel(dir='N')
 
-    flow_angle = np.rad2deg(np.arctan2(v, u)) % 360
+    flow_ang = np.rad2deg(np.arctan2(v, u)) % 360
 
-    return flow_angle.rename('angle')
+    return flow_ang.rename('angle')
 
 
-def calculate_excursion_length(ds):
+def excursion_length(ds, depth, angle_deg):
     """
     Calculate distance a water particle moves during a contiguous period of unidirectional motion.
     
@@ -331,8 +522,24 @@ def calculate_excursion_length(ds):
     ----------
     ds : xr.Dataset
         ADCP data.
+    depth : float
+        Depth of ADCP bin.
+    angle_deg : float
+        Angle of interface in degrees.  0° indicates E-W interface.  90° indicates N-S interface.
 
     Returns
     -------
+    cuf : pd.DataFrame
+        Contiguous unidirectional flow data with excursion lengths [m].
     """
-    raise NotImplementedError
+    cuf, vel = contiguous_unidirectional_flow(ds, depth, angle_deg)
+
+    el_vals = []
+    for _, row in cuf.iterrows():
+            v_sel = vel.isel(time=slice(row.idx_start, row.idx_end))
+            time_s = (v_sel.time - v_sel.time[0]).astype('timedelta64[s]').astype(float)
+            el = v_sel.assign_coords(time=time_s).integrate('time').item()
+            el_vals.append(abs(el))
+    cuf['excursion_length'] = el_vals
+
+    return cuf

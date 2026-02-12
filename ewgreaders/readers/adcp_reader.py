@@ -95,7 +95,8 @@ class ADCPReader(MooringReader):
             Orientation {up, down} of ADCP.
         """
         if ds and 'orientation' in ds.attrs.keys():
-            return ds.attrs['orientation']
+            pass
+            #return ds.attrs['orientation']          # orientation not always correct in data file
         
         instruments = self.md['instruments']
         for i in instruments:
@@ -110,7 +111,7 @@ class ADCPReader(MooringReader):
 
     def range_to_depth(self, ds):
         """
-        Convert ADCP range values to depths.
+        Convert ADCP range values to depths.  Set attribute if surface or bottom is reached.
 
         Parameters
         ----------
@@ -127,6 +128,8 @@ class ADCPReader(MooringReader):
             ds['range'] = np.round(self.depth - ds.range.values, 1)
         elif self.orientation == 'down':
             ds['range'] = np.round(self.depth + ds.range.values, 1)
+
+        self.surfbot = (ds['range'].max().item() >= self.total_depth) | (ds['range'].min().item() <= 0)
 
         return ds
 
@@ -366,7 +369,7 @@ class ADCPReader(MooringReader):
         return ds.where(pitch & roll)
     
 
-    def qa_echo_amp_diff(self, ds, surfbot_toggle=True, ead_thresh=30):
+    def qa_echo_amp_diff(self, ds, surfbot_toggle=False, ead_thresh=30):
         """
         Filter data with at least one beam with vertical echo difference between 
         consecutive bins > 30.
@@ -387,7 +390,7 @@ class ADCPReader(MooringReader):
         ds : xr.Dataset
             ADCP data with vertical echo difference filtered.
         """
-        if not surfbot_toggle:
+        if not self.surfbot and not surfbot_toggle:
             return ds
         
         echo_amp_diff = ds.amp.diff(dim='range')

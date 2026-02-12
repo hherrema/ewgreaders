@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pyrsktools as rsk
 import json
+from glob import glob
 
 from .mooring_reader import MooringReader
 
@@ -41,6 +42,9 @@ class O2Reader(MooringReader):
         """
         super().__init__(lake, location, year, date, datalakes)
         self.serial_id = serial_id
+        self.sensor = self.get_sensor_type()
+        self.mab = self.get_mab()
+        self.depth = self.set_depth()
 
 
     def get_mab(self):
@@ -89,6 +93,25 @@ class O2Reader(MooringReader):
         return None
     
 
+    def get_fpath_L0(self):
+        """
+        Get file path to raw (LO) data.
+
+        Returns
+        -------
+        fpath_L0 : str
+            Path to raw (L0) data.
+        """
+        if self.sensor == 'minidot':
+            fpath_L0 = f'{self.dpath_L0}/7450-{self.serial_id}/Cat.txt'
+        elif self.sensor == 'rbr_do':
+            fpath_L0 = glob(f'{self.dpath_L0}/*{self.serial_id}*.rsk')[0]
+        else:
+            raise NotImplementedError("Only minidot and rbr_do sensors are handled.")
+        
+        return fpath_L0
+    
+
     def load_from_L0(self):
         """
         Load raw (L0) oxygen logger data into xarray Dataset.
@@ -98,6 +121,7 @@ class O2Reader(MooringReader):
         ds : xr.Dataset
             Dataset of data recorded by oxygen logger.
         """
+        self.fpath_L0 = self.get_fpath_L0()
         if self.sensor == 'minidot':
             data = self.parse_minidot_L0()
         elif self.sensor == 'rbr_do':
@@ -121,7 +145,7 @@ class O2Reader(MooringReader):
         data : pd.DataFrame
             Data from Minidot oxygen logger.
         """
-        with open(self.fpath, 'r') as f:
+        with open(self.fpath_L0, 'r') as f:
                 lines = [x[:-1] for x in f if len(x.split(',')) > 1]
 
         # extract colum names
@@ -136,7 +160,7 @@ class O2Reader(MooringReader):
         data = data.rename(columns=self.COLS_MAP_MINIDOT)
         data['time'] = pd.to_datetime(data['time'])
         data['temp'] = data['temp'].astype(float)
-        data['d_oxygen'] = data['d_oxygen'].astype(float)
+        data['d_oxygen_conc'] = data['d_oxygen_conc'].astype(float)
         data['d_oxygen_sat'] = data['d_oxygen_sat'].astype(float)
 
         return data
@@ -151,7 +175,7 @@ class O2Reader(MooringReader):
         data : pd.DataFrame
             Data from RBR_DO oxygen logger.
         """
-        with rsk.RSK(self.fpath) as f:
+        with rsk.RSK(self.fpath_L0) as f:
             f.readdata()
             data = pd.DataFrame(f.data)
 

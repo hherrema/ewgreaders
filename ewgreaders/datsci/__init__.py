@@ -1,3 +1,5 @@
 __all__ = [
-    'lakes'
+    'lakes',
+    'efd',
+    'signal'
 ]

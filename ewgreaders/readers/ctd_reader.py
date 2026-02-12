@@ -37,14 +37,12 @@ class CTDReader(ProfileReader):
     }
 
 
-    def __init__(self, serial_id, lake, year, date, fpath, datalakes=False):
+    def __init__(self, lake, year, date, fpath, serial_id=None, datalakes=False):
         """
         Initialize CTDReader object.
 
         Parameters
         ----------
-        serial_id : str
-            Serial number of CTD.
         lake : str
             Lake where CTD profiles.
         year : str
@@ -53,6 +51,8 @@ class CTDReader(ProfileReader):
             Date (YYYYMMDD) of CTD profiles.
         fpath : str
             File path to profile.
+        serial_id : str
+            Serial number of CTD.
         datalakes : bool
             Toggle whether to read from Eawag drive or DataLakes.
         """
