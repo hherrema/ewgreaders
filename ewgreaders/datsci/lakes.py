@@ -104,6 +104,41 @@ def contiguous_unidirectional_flow(ds, depth, angle_deg):
     return pd.DataFrame(cuf), vel
 
 
+def center_of_volume(bathy, depth):
+    """
+    Calculate center of volume of lake.
+    
+    Parameters
+    ----------
+    bathy : xr.Dataset
+        Lake bathymetry.
+    depth : xr.DataArray
+        Depth values from CTD profile.
+
+    Returns
+    -------
+    zv : float
+        Center of volume.
+    area_z : xr.DataArray
+        Area as a function of depth.
+    """
+    #area = [(bathy.depth > d).sum().item() for d in depth.values]
+    # area at each depth
+    bathy_arr = bathy.depth.values.ravel()
+    bathy_arr = bathy_arr[~np.isnan(bathy_arr)]
+    bathy_sorted = np.sort(bathy_arr)
+    idx = np.searchsorted(bathy_sorted, depth.values, side='right')
+    area = len(bathy_sorted) - idx
+
+    # store in DataArray
+    area_z = xr.DataArray(area, dims='depth', coords={'depth': depth.values}, name='area')
+
+    # center of volume
+    zv = (area_z.depth * area_z).integrate(coord='depth') / area_z.integrate(coord='depth')
+    
+    return zv.item(), area_z
+
+
 # ---------- CTD ---------- #
 
 def mixed_layer_depth(ds, thresh=0.01):
@@ -359,6 +394,39 @@ def thorpe_displacement(ds):
     # ensure depth increases monotonically
     raise NotImplementedError
 
+
+def schmidt_stability(ds, bathy):
+    """
+    Calculate Schmidt stability.
+    St = (g / A0) * int{0^zm}(z - zv) * rhoz * Az dz
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        CTD data.
+    bathy : xr.Dataset
+        Lake Bathymetry
+
+    Returns
+    -------
+    St : float
+        Schmidt stability.
+    """
+    g = 9.81
+    # surface area
+    A0 = (bathy.depth > 0).sum().item()
+
+    mask = (ds['depth'].notnull()) & (ds['Temp_qual'] == 0) & (ds['Cond_qual'] == 0)
+    depth = ds['depth'][mask]
+    rho = ds['rho'][mask]
+
+    # calculate center of volume and area at each depth
+    zv, area_z = center_of_volume(bathy, depth)
+    
+    integral = xr.DataArray(((depth.values - zv) * rho.values * area_z), dims='depth', coords={'depth': depth.values}, name='St_integrand').integrate(coord='depth')
+    St = (g / A0) * integral
+
+    return St.item()
 
 # ---------- ADCP ----------
 
