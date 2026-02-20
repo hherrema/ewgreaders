@@ -6,6 +6,7 @@ import xarray as xr
 import numpy as np
 import json
 from glob import glob
+import warnings
 
 from .mooring_reader import MooringReader
 
@@ -37,6 +38,7 @@ class ADCPReader(MooringReader):
         self.mab = self.get_mab()
         self.depth = self.get_depth()
         self.orientation = self.get_orientation()
+        self.fpath_L0 = self.locate_data_file('L0')
 
 
     # ---------- Metadata ---------- #
@@ -73,8 +75,10 @@ class ADCPReader(MooringReader):
         depth : float
             Depth below water surface of ADCP.
         """
-        if ds and 'pressure' in ds.data_vars:
-            return ds.depth.where(ds.depth != 0, drop=True).mean().item()
+        if ds and 'pressure' in ds.data_vars and ds.pressure.mean().item() != 0:
+            return ds.where(ds.depth != 0).depth.median().item()
+        elif ds:
+            warnings.warn('No pressure measurements on ADCP, returning calculating depth from metadata.')
 
         return self.total_depth - self.mab
     
@@ -148,10 +152,10 @@ class ADCPReader(MooringReader):
         Returns
         -------
         fpath : list
-            Path(s) to data file(s).
+            Path to data file.
         """
         if level == 'L0':
-            fpath = glob(f'{self.dpath_L0}/*{self.serial_id}*.000')
+            fpaths = glob(f'{self.dpath_L0}/*{self.serial_id}*.000')
         elif level == 'L1':
             raise NotImplementedError
         elif level == 'L2':
@@ -159,30 +163,22 @@ class ADCPReader(MooringReader):
         else:
             raise ValueError("Data level must be L0, L1, or L2.")
         
-        if len(fpath) == 0:
-            raise IndexError(f'Could not find data file for {self.serial_id}.')
+        if len(fpaths) != 1:
+            raise IndexError(f'Could not find single data file for {self.serial_id}.')
         
-        return fpath
+        return fpaths[0]
     
 
-    def load_from_L0(self, fpath):
+    def load_from_L0(self):
         """
         Load raw (L0) ADCP data into xarray Dataset.
-
-        Parameters
-        ----------
-        fpath : list
-            Path(s) to data file(s).
 
         Returns
         -------
         ds : xr.Dataset
             Dataset of all data recorded by ADCP.
         """
-        if len(fpath) == 1:
-            ds = dlfn.read(fpath[0])
-        else:
-            raise NotImplementedError
+        ds = dlfn.read(self.fpath_L0)
         
         # set depth and orientation attributes
         self.depth = self.get_depth(ds)

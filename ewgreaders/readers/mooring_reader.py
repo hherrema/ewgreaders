@@ -5,6 +5,7 @@ import os
 import json
 from datetime import datetime
 import xarray as xr
+import pandas as pd
 
 
 class MooringReader:
@@ -40,7 +41,7 @@ class MooringReader:
         self.md_file = self.locate_md_file()
         self.md = self.open_md_file()
         self.total_depth = self.get_total_depth()
-
+        
         self.dpath_L0, self.dpath_L1, self.dpath_L2 = self.locate_data_dirs()
 
 
@@ -172,6 +173,26 @@ class MooringReader:
         return deploy, retrieve
     
     
+    def get_instruments(self, pandas=False):
+        """
+        Parse metadata file for all instruments.
+
+        Parameters
+        ----------
+        pandas : bool
+            If True, return pandas DataFrame.
+
+        Returns
+        -------
+        instruments : list
+            Metadata dictionaries for all instruments on mooring.
+        """
+        if pandas:
+            return pd.DataFrame(self.md['instruments'])
+        else:
+            return self.md['instruments']
+    
+
     def get_adcps(self):
         """
         Parse metadata file for ADCPs.
@@ -221,6 +242,53 @@ class MooringReader:
         """
         raise NotImplementedError("Subclasses must implement method.")
     
+
+    def extract_sensor_depths(self):
+        """
+        Extract depths from instruments on moorings with pressure sensors (RBR duet, ADCP).
+
+        Returns
+        -------
+        sensor_depths : pd.DataFrame
+            Depths for instruments with pressure sensors.
+        """
+        # import subclasses within method to avoid circular imports
+        from .thermistor_reader import ThermistorReader
+        from .adcp_reader import ADCPReader
+
+        sensor_depths = []
+        instruments = self.get_instruments()
+        for i in instruments:
+            if i['instrument'] == 'rbr_duet':
+                treader = ThermistorReader(i['serial_id'], self.lake, self.location, self.year, self.date)
+                ds = treader.load_from_L0()
+                depth, pressure, air_pressure = treader.calculate_rbr_duet_depth(ds)
+                sensor_depths.append({
+                    'instrument': i['instrument'],
+                    'serial_id': i['serial_id'],
+                    'depth_sensor': depth,
+                    'pressure': pressure,
+                    'air_pressure': air_pressure,
+                    'depth_md': treader.total_depth - i['mab']
+                })
+            
+            elif i['instrument'] == 'adcp':
+                areader = ADCPReader(i['serial_id'], self.lake, self.location, self.year, self.date)
+                ds = areader.load_from_L0()
+                if ds and 'pressure' in ds.data_vars and ds.pressure.mean().item() != 0:
+                    depth = ds.where(ds.depth != 0).depth.median().item()
+                    sensor_depths.append({
+                        'instrument': i['instrument'],
+                        'serial_id': i['serial_id'],
+                        'depth_sensor': depth,
+                        'depth_md': areader.total_depth - i['mab']
+                    })
+
+        if len(sensor_depths) == 0:
+            raise ValueError('No instruments on mooring have pressure sensors.')
+        
+        return pd.DataFrame(sensor_depths)
+        
 
     def create_instrument_chain(self, datasets):
         """

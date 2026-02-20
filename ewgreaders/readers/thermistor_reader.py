@@ -86,6 +86,41 @@ class ThermistorReader(MooringReader):
             Depth below water surface of thermistor.
         """
         return self.total_depth - self.mab
+    
+
+    def calculate_rbr_duet_depth(self, ds, p_atm=10.1325):
+        """
+        Calculate depth of thermistor with pressure data.
+        Approximate depth as pressure - air pressure.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Thermistor data from RBR duet.
+        p_atm : float
+            Atmospheric pressure [dbar].
+
+        Returns
+        -------
+        depth : float
+            Sensor depth in lake [m].
+        pressure : float
+            Sensor pressure while in water [dbar].
+        air_pressure : float
+            Sensor pressure while in air [dbar].
+        """
+        # mean pressure while in air
+        air_pressure = ds.where(ds.pressure <= p_atm).pressure.mean().item()
+        if np.isnan(air_pressure):
+            air_pressure = p_atm
+
+        # median pressure while in water
+        pressure = ds.where(ds.pressure > p_atm).pressure.median().item()
+
+        # approximate depth as gauge pressure
+        depth = pressure - air_pressure
+
+        return depth, pressure, air_pressure
 
 
     def locate_data_file(self, level):
