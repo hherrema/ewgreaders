@@ -34,12 +34,8 @@ class MooringProcessor:
         self.year = year
         self.date = date
 
-        self.md_file = self.locate_md_file()
-        self.md = self.open_md_file()
-        self.total_depth = self.get_total_depth()
 
-        self.dpath_L0, self.dpath_L1, self.dpath_L2 = self.locate_data_dirs()
-
+    # ---------- Metadata ----------
 
     def locate_md_file(self):
         """
@@ -66,8 +62,64 @@ class MooringProcessor:
             md = json.load(f)
 
         return md
+
+
+    def get_adcps(self):
+        """
+        Parse metadata file for ADCPs.
+
+        Returns
+        -------
+        adcps : list
+            Metadata dictionaries for all ADCPs on mooring.
+        """
+        md = self.open_md_file()
+        return [i for i in md['instruments'] if i['instrument'] == 'adcp']
     
+
+    def get_thermistors(self):
+        """
+        Parse metadata file for thermistors.
+
+        Returns
+        -------
+        thermistors : list
+            Metadata dictionaries for all thermistors on mooring.
+        """
+        md = self.open_md_file()
+        return [i for i in md['instruments'] if i['instrument'] in self.THERMISTORS]
     
+
+    def get_oxygen_loggers(self):
+        """
+        Parse metadata file for oxygen loggers.
+
+        Returns
+        -------
+        oxygen_loggers : list
+            Metadata dictionaries for all oxygen loggers on mooring.
+        """
+        md = self.open_md_file()
+        return [i for i in md['instruments'] if i['instrument'] in self.OXYGEN_LOGGERS]
+    
+
+    def get_sensor_type(self, serial_id):
+        """
+        Parse metadata file for sensor type.
+
+        Returns
+        -------
+        sensor : str
+            Type of sensor.
+        """
+        md = self.open_md_file()
+        for i in md['instruments']:
+            if i['serial_id'] == self.serial_id and i['instrument'] in self.ADCPS + self.THERMISTORS + self.OXYGEN_LOGGERS:
+                return i['instrument']
+            
+        raise ValueError(f'{self.serial_id} sensor not found')
+    
+
     def locate_data_dirs(self):
         """
         Locate data directories for L0, L1, and L2 data.
@@ -84,56 +136,3 @@ class MooringProcessor:
         dpath = self.DPATH.format(lake=self.lake, location=self.location, year=self.year, date=self.date)
 
         return os.path.join(dpath, 'L0'), os.path.join(dpath, 'L1'), os.path.join(dpath, 'L2')
-    
-    
-    def get_sensor_type(self):
-        """
-        Parse metadata file for sensor type.
-
-        Returns
-        -------
-        sensor : str
-            Type of sensor.
-        """
-        instruments = self.md['instruments']
-        for i in instruments:
-            if i['serial_id'] == self.serial_id and i['instrument'] in self.ADCPS + self.THERMISTORS + self.OXYGEN_LOGGERS:
-                return i['instrument']
-            
-        raise ValueError(f'{self.serial_id} sensor not found')
-
-
-    def get_adcps(self):
-        """
-        Parse metadata file for ADCPs.
-
-        Returns
-        -------
-        adcps : list
-            Metadata dictionaries for all ADCPs on mooring.
-        """
-        return [i for i in self.md['instruments'] if i['instrument'] == 'adcp']
-    
-
-    def get_thermistors(self):
-        """
-        Parse metadata file for thermistors.
-
-        Returns
-        -------
-        thermistors : list
-            Metadata dictionaries for all thermistors on mooring.
-        """
-        return [i for i in self.md['instruments'] if i['instrument'] in self.THERMISTORS]
-    
-
-    def get_oxygen_loggers(self):
-        """
-        Parse metadata file for oxygen loggers.
-
-        Returns
-        -------
-        oxygen_loggers : list
-            Metadata dictionaries for all oxygen loggers on mooring.
-        """
-        return [i for i in self.md['instruments'] if i['instrument'] in self.OXYGEN_LOGGERS]

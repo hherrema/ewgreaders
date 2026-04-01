@@ -1,38 +1,35 @@
-### Class for processing Thermistor data
+### Class for processing ADCP data
 
 # imports
 import json
 import os
 from glob import glob
-import pyrsktools as rsk
-import pandas as pd
-import xarray as xr
+import dolfyn as dlfn
 import warnings
 
 
-class ThermistorProcessor:
+class ADCPProcessor:
     MD_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_md.json'
     DPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/'
-    THERMISTORS = ['rbr_temp', 'rbr_duet']
-    COLS_MAP = {'timestamp': 'time', 'temperature': 'temp'}
+    ADCPS = ['adcp']
 
-    
+
     def __init__(self, lake, location, year, date, serial_id):
         """
-        Initialize ThermistorProcessor object.
+        Initialize ADCPProcessor object.
 
         Parameters
         ----------
         lake : str
-            Lake where thermistor is deployed.
+            Lake where ADCP is deployed.
         location : str
-            Location code within lake of thermistor deployment.
+            Location code within lake of ADCP deployment.
         year : str
-            Year of thermistor retrieval. 
+            Year of ADCP retrieval. 
         date : str
-            Date (YYYYMMDD) of thermistor retrieval.
+            Date (YYYYMMDD) of ADCP retrieval.
         serial_id : str
-            Serial number of thermistor.
+            Serial number of ADCP.
         """
         self.lake = lake
         self.location = location
@@ -86,12 +83,12 @@ class ThermistorProcessor:
         """
         md = self.open_md_file()
         for i in md['instruments']:
-            if i['serial_id'] == self.serial_id and i['instrument'] in self.THERMISTORS:
+            if i['serial_id'] == self.serial_id and i['instrument'] in self.OXYGEN_LOGGERS:
                 return i['instrument']
             
         raise ValueError(f'{self.serial_id} sensor not found')
     
-    
+
     def get_mab(self):
         """
         Parse metadata file for sensor type.
@@ -160,14 +157,14 @@ class ThermistorProcessor:
 
     def locate_file_L0(self):
         """
-        Locate file with raw (L0) thermistor data.
+        Locate file with raw (L0) ADCP data.
 
         Returns
         -------
         fpath_L0 : str
             Path to L0 data file.
         """
-        fpaths = glob(f'{self.dpath_L0}/*{self.serial_id}*.rsk')
+        fpaths = glob(f'{self.dpath_L0}/*{self.serial_id}*.000')
         
         if len(fpaths) != 1:
             raise IndexError(f'Could not find single data file for {self.serial_id}.')
@@ -175,40 +172,27 @@ class ThermistorProcessor:
         return fpaths[0]
     
 
-    # ---------- L0 to L1 ----------
+    # ---------- L0 to L1 ----------    
 
     def parse_L0(self):
         """
-        Load raw (L0) thermistor data into xarray Dataset.
+        Load raw (L0) ADCP data into xarray Dataset.
 
         Returns
         -------
         ds : xr.Dataset
-            Dataset of data recorded by thermistor.
+            Dataset of data recorded by ADCP.
         """
         fpath_L0 = self.locate_file_L0()
 
-        if self.sensor in  ['rbr_temp', 'rbr_duet']:
-            with rsk.RSK(fpath_L0) as f:
-                f.readdata()
-                data = pd.DataFrame(f.data)
+        return dlfn.read(fpath_L0)
 
-            data = data.rename(columns=self.COLS_MAP)
-            data = data.set_index('time')
-
-            ds = xr.Dataset.from_dataframe(data)
-            ds = ds.assign_coords(depth=self.depth, serial_id=self.serial_id)
-        else:
-            raise NotImplementedError("Only rbr_temp and rbr_duet sensors are handled.")
-        
-        return ds
-    
     
     # ---------- L1 to L2 ----------
 
     def quality_assurance(self):
         """
-        Run quality assurance on L1 thermistor data.
+        Run quality assurance on L1 ADCP data.
         """
         raise NotImplementedError
     
@@ -223,7 +207,7 @@ class ThermistorProcessor:
         Parameters
         ----------
         ds : xr.Dataset
-            Thermistor data.
+            ADCP data.
         level : str
             L1 or L2.
         overwrite : bool
@@ -253,7 +237,7 @@ class ThermistorProcessor:
 
     def process(self):
         """
-        Process raw (L0) thermistor data.  Convert to xarray and write to .nc (L1).
+        Process raw (L0) ADCP data.  Convert to xarray and write to .nc (L1).
         Run quality assurance and write to .nc (L2).
         """
         ds = self.parse_L0()

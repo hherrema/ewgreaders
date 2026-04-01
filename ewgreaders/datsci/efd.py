@@ -139,9 +139,9 @@ def vertical_shear(ds):
 
 
 # ---------- CTD + ADCP ----------
-def richardson_number(ds_adcp):
+def gradient_richardson_number(ds_adcp):
     """
-    Calculate Richardson number.
+    Calculate the gradient Richardson number.
     Ri = N^2 / S^2
     """
     raise NotImplementedError

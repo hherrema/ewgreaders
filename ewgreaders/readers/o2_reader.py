@@ -146,7 +146,7 @@ class O2Reader(MooringReader):
             Data from Minidot oxygen logger.
         """
         with open(self.fpath_L0, 'r') as f:
-                lines = [x[:-1] for x in f if len(x.split(',')) > 1]
+            lines = [x[:-1] for x in f if len(x.split(',')) > 1]
 
         # extract colum names
         cols = [x.lstrip(' ') for x in lines[0].split(',')]

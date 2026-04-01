@@ -259,30 +259,33 @@ class MooringReader:
         sensor_depths = []
         instruments = self.get_instruments()
         for i in instruments:
-            if i['instrument'] == 'rbr_duet':
-                treader = ThermistorReader(i['serial_id'], self.lake, self.location, self.year, self.date)
-                ds = treader.load_from_L0()
-                depth, pressure, air_pressure = treader.calculate_rbr_duet_depth(ds)
-                sensor_depths.append({
-                    'instrument': i['instrument'],
-                    'serial_id': i['serial_id'],
-                    'depth_sensor': depth,
-                    'pressure': pressure,
-                    'air_pressure': air_pressure,
-                    'depth_md': treader.total_depth - i['mab']
-                })
-            
-            elif i['instrument'] == 'adcp':
-                areader = ADCPReader(i['serial_id'], self.lake, self.location, self.year, self.date)
-                ds = areader.load_from_L0()
-                if ds and 'pressure' in ds.data_vars and ds.pressure.mean().item() != 0:
-                    depth = ds.where(ds.depth != 0).depth.median().item()
+            try:
+                if i['instrument'] == 'rbr_duet':
+                    treader = ThermistorReader(i['serial_id'], self.lake, self.location, self.year, self.date)
+                    ds = treader.load_from_L0()
+                    depth, pressure, air_pressure = treader.calculate_rbr_duet_depth(ds)
                     sensor_depths.append({
                         'instrument': i['instrument'],
                         'serial_id': i['serial_id'],
                         'depth_sensor': depth,
-                        'depth_md': areader.total_depth - i['mab']
+                        'pressure': pressure,
+                        'air_pressure': air_pressure,
+                        'depth_md': treader.total_depth - i['mab']
                     })
+                
+                elif i['instrument'] == 'adcp':
+                    areader = ADCPReader(i['serial_id'], self.lake, self.location, self.year, self.date)
+                    ds = areader.load_from_L0()
+                    if ds and 'pressure' in ds.data_vars and ds.pressure.mean().item() != 0:
+                        depth = ds.where(ds.depth != 0).depth.median().item()
+                        sensor_depths.append({
+                            'instrument': i['instrument'],
+                            'serial_id': i['serial_id'],
+                            'depth_sensor': depth,
+                            'depth_md': areader.total_depth - i['mab']
+                        })
+            except IndexError:    # can't find data file for instrument
+                continue
 
         if len(sensor_depths) == 0:
             raise ValueError('No instruments on mooring have pressure sensors.')

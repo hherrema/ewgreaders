@@ -78,7 +78,7 @@ class ADCPReader(MooringReader):
         if ds and 'pressure' in ds.data_vars and ds.pressure.mean().item() != 0:
             return ds.where(ds.depth != 0).depth.median().item()
         elif ds:
-            warnings.warn('No pressure measurements on ADCP, returning calculating depth from metadata.')
+            warnings.warn('No pressure measurements on ADCP, calculating depth from metadata.')
 
         return self.total_depth - self.mab
     

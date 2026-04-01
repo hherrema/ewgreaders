@@ -1,38 +1,45 @@
-### Class for processing Thermistor data
+### Class for processing Oxygen Logger data
 
 # imports
 import json
 import os
 from glob import glob
-import pyrsktools as rsk
 import pandas as pd
+import pyrsktools as rsk
 import xarray as xr
 import warnings
 
 
-class ThermistorProcessor:
+class O2Processor:
     MD_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_md.json'
     DPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/'
-    THERMISTORS = ['rbr_temp', 'rbr_duet']
-    COLS_MAP = {'timestamp': 'time', 'temperature': 'temp'}
+    OXYGEN_LOGGERS = ['minidot', 'rbr_do']
+    COLS_DROP_MINIDOT = ['Unix Timestamp', 'Coordinated Universal Time', 'Battery', 'Q']
+    COLS_MAP_MINIDOT = {
+        'UTC_Date_&_Time': 'time', 
+        'Temperature': 'temp', 
+        'Dissolved Oxygen': 'do2_conc', 
+        'Dissolved Oxygen Saturation': 'dp2_sat'
+    }
+    COLS_MAP_RBR_DO = {'timestamp': 'time', 'dissolved_o2_saturation': 'do2_sat'}
 
-    
+
     def __init__(self, lake, location, year, date, serial_id):
         """
-        Initialize ThermistorProcessor object.
+        Initialize O2Processor object.
 
         Parameters
         ----------
         lake : str
-            Lake where thermistor is deployed.
+            Lake where oxygen logger is deployed.
         location : str
-            Location code within lake of thermistor deployment.
+            Location code within lake of oxygen logger deployment.
         year : str
-            Year of thermistor retrieval. 
+            Year of oxygen logger retrieval. 
         date : str
-            Date (YYYYMMDD) of thermistor retrieval.
+            Date (YYYYMMDD) of oxygen logger retrieval.
         serial_id : str
-            Serial number of thermistor.
+            Serial number of oxygen logger.
         """
         self.lake = lake
         self.location = location
@@ -86,12 +93,12 @@ class ThermistorProcessor:
         """
         md = self.open_md_file()
         for i in md['instruments']:
-            if i['serial_id'] == self.serial_id and i['instrument'] in self.THERMISTORS:
+            if i['serial_id'] == self.serial_id and i['instrument'] in self.OXYGEN_LOGGERS:
                 return i['instrument']
             
         raise ValueError(f'{self.serial_id} sensor not found')
     
-    
+
     def get_mab(self):
         """
         Parse metadata file for sensor type.
@@ -160,55 +167,116 @@ class ThermistorProcessor:
 
     def locate_file_L0(self):
         """
-        Locate file with raw (L0) thermistor data.
+        Locate file with raw (L0) oxygen logger data.
 
         Returns
         -------
         fpath_L0 : str
             Path to L0 data file.
         """
-        fpaths = glob(f'{self.dpath_L0}/*{self.serial_id}*.rsk')
+        if self.sensor == 'minidot':
+            fpath_L0 = f'{self.dpath_L0}/7450-{self.serial_id}/Cat.txt'
+        elif self.sensor == 'rbr_do':
+            fpaths = glob(f'{self.dpath_L0}/*{self.serial_id}*.rsk')
+            if len(fpaths) != 1:
+                raise IndexError(f'Could not find single data file for {self.serial_id}.')
+            fpath_L0 = fpaths[0]
+        else:
+            raise NotImplementedError("Only minidot and rbr_do sensors are handled.")
         
-        if len(fpaths) != 1:
-            raise IndexError(f'Could not find single data file for {self.serial_id}.')
-        
-        return fpaths[0]
+        return fpath_L0
     
 
     # ---------- L0 to L1 ----------
+    
+    def parse_minidot_L0(self, fpath_L0):
+        """
+        Parse raw (L0) data from Minidot oxygen logger.
+
+        Parameters
+        ----------
+        fpath_L0 : str
+            File path to raw (L0) Minidot oxygen logger data.
+
+        Returns
+        -------
+        data : pd.DataFrame
+            Data from Minidot oxygen logger.
+        """
+        with open(fpath_L0, 'r') as f:
+            lines = [x[:-1] for x in f if len(x.split(',')) > 1]
+
+        # extract colum names
+        cols = [x.lstrip(' ') for x in lines[0].split(',')]
+
+        data = []
+        for line in lines[2:]:
+            data.append([x.lstrip(' ') for x in line.split(',')])
+        data = pd.DataFrame(data, columns=cols)
+
+        data = data.drop(self.COLS_DROP_MINIDOT, axis=1)
+        data = data.rename(columns=self.COLS_MAP_MINIDOT)
+        data['time'] = pd.to_datetime(data['time'])
+        data['temp'] = data['temp'].astype(float)
+        data['d_oxygen_conc'] = data['d_oxygen_conc'].astype(float)
+        data['d_oxygen_sat'] = data['d_oxygen_sat'].astype(float)
+
+        return data
+    
+    
+    def parse_RBR_DO_L0(self, fpath_L0):
+        """
+        Parse raw (L0) data from RBR_DO oxygen logger.
+
+        Parameters
+        ----------
+        fpath_L0 : str
+            File path to raw (L0) RBR_DO oxygen logger data.
+
+        Returns
+        -------
+        data : pd.DataFrame
+            Data from RBR_DO oxygen logger.
+        """
+        with rsk.RSK(fpath_L0) as f:
+            f.readdata()
+            data = pd.DataFrame(f.data)
+
+        data = data.rename(columns=self.COLS_MAP_RBR_DO)
+
+        return data
+    
 
     def parse_L0(self):
         """
-        Load raw (L0) thermistor data into xarray Dataset.
+        Load raw (L0) oxygen logger data into xarray Dataset.
 
         Returns
         -------
         ds : xr.Dataset
-            Dataset of data recorded by thermistor.
+            Dataset of data recorded by oxygen logger.
         """
         fpath_L0 = self.locate_file_L0()
 
-        if self.sensor in  ['rbr_temp', 'rbr_duet']:
-            with rsk.RSK(fpath_L0) as f:
-                f.readdata()
-                data = pd.DataFrame(f.data)
-
-            data = data.rename(columns=self.COLS_MAP)
-            data = data.set_index('time')
-
-            ds = xr.Dataset.from_dataframe(data)
-            ds = ds.assign_coords(depth=self.depth, serial_id=self.serial_id)
+        if self.sensor == 'minidot':
+            data = self.parse_minidot_L0(fpath_L0)
+        elif self.sensor == 'rbr_do':
+            data = self.parse_RBR_DO_L0(fpath_L0)
         else:
-            raise NotImplementedError("Only rbr_temp and rbr_duet sensors are handled.")
+            raise NotImplementedError("Only minidot and rbr_do sensors are handled.")
         
+        data = data.set_index('time')
+        ds = xr.Dataset.from_dataframe(data)
+        ds = ds.assign_coords(depth=self.depth, serial_id=self.serial_id)
+
         return ds
-    
+
     
     # ---------- L1 to L2 ----------
 
     def quality_assurance(self):
         """
-        Run quality assurance on L1 thermistor data.
+        Run quality assurance on L1 oxygen logger data.
         """
         raise NotImplementedError
     
@@ -223,7 +291,7 @@ class ThermistorProcessor:
         Parameters
         ----------
         ds : xr.Dataset
-            Thermistor data.
+            Oxygen logger data.
         level : str
             L1 or L2.
         overwrite : bool
@@ -253,7 +321,7 @@ class ThermistorProcessor:
 
     def process(self):
         """
-        Process raw (L0) thermistor data.  Convert to xarray and write to .nc (L1).
+        Process raw (L0) oxygen logger data.  Convert to xarray and write to .nc (L1).
         Run quality assurance and write to .nc (L2).
         """
         ds = self.parse_L0()
