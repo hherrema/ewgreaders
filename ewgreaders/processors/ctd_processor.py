@@ -7,12 +7,16 @@ import pandas as pd
 import xarray as xr
 import warnings
 import gsw as sw
+from glob import glob
 
 
 class CTDProcessor:
-    MD_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/CTD/{date}/{fname_L0}_md.json'
+    MD_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/CTD/{date}/{fname}_md.json'
     DPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/CTD/{date}/'
+    DIPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/ctd.json'
     #SID_BRAND_MAP = {'1807': 'Sea&Sun', '2023': 'Sea&Sun', '66131': 'RBR'}
+    #COLS_DROP_RBR = ['temperature1', 'speed_of_sound']
+    #COLS_MAP_RBR = {}
     VARS_DROP_SEASUN = ['DO_ml', 'pH', 'Vbatt', 'IntD', 'IntT']
     VARS_MAP_SEASUN = {
         'Press': 'press',
@@ -47,7 +51,7 @@ class CTDProcessor:
         'fall_speed': {'units': 'm/s', 'long_name': 'Falling Speed'}
     }
 
-    def __init__(self, lake, year, date, fname_L0):
+    def __init__(self, lake, year, date, fname):
         """
         Initialize CTDProcessor object.
 
@@ -59,13 +63,13 @@ class CTDProcessor:
             Year of CTD profile. 
         date : str
             Date (YYYYMMDD) of CTD profile.
-        fname_L0 : str
+        fname : str
             File name of raw (L0) data.
         """
         self.lake = lake
         self.year = year
         self.date = date
-        self.fname_L0 = fname_L0
+        self.fname = fname
 
         self.md_file = self.locate_md_file()
         self.sensor = self.get_sensor_type()
@@ -85,7 +89,7 @@ class CTDProcessor:
         md_path : str
             File path to metadata JSON file.
         """
-        return self.MD_PATH.format(lake=self.lake, year=self.year, date=self.date, fname_L0=self.fname_L0)
+        return self.MD_PATH.format(lake=self.lake, year=self.year, date=self.date, fname=self.fname)
     
     
     def open_md_file(self):
@@ -204,7 +208,7 @@ class CTDProcessor:
             Path to L0 data file.
         """
         if self.sensor == 'sea&sun':
-            fpath_L0 = f'{self.dpath_L0}/{self.fname_L0}.TOB'
+            fpath_L0 = f'{self.dpath_L0}/{self.fname}.TOB'
         else:
             raise NotImplementedError('Only sea&sun sensors are handled.')
         
@@ -212,6 +216,50 @@ class CTDProcessor:
     
 
     # ---------- L0 to L1 ----------
+    """
+    def separate_profiles_RBR_L0(self):
+        Load raw (L0) CTD from RBR CTD, separate profiles, and write to individual files.
+
+        Returns
+        -------
+        profiles : list
+            List of output file paths and xarray Datasets for each profile.
+
+        brand = self.SID_BRAND_MAP[self.serial_id]
+        if brand != 'RBR':
+            raise ValueError("Only RBR CTD L0 data requires profile separation.")
+        
+        froot, ext = os.path.splitext(self.fpath)
+        if ext != '.rsk':
+            raise ValueError("Only RBR CTD L0 .rsk files require profile separation.")
+        
+        with rsk.RSK(self.fpath) as f:
+            f.readdata()
+            data = f.data
+
+            # find indices of each profile
+            f.computeprofiles()
+            profiles_idx = f.getprofilesindices(direction='both')
+
+        # separate profiles and write out
+        profiles = []
+        air_idx_start = 0
+        for i, p_idx in enumerate(profiles_idx):
+            # calculate air pressure prior to downcast
+            air_pressure = np.mean(data[air_idx_start: min(p_idx)]['pressure'])
+            air_idx_start = max(p_idx) + 1
+
+            p_data = pd.DataFrame(data[p_idx])
+            p_data = p_data.set_index('timestamp')
+            ds = xr.Dataset.from_dataframe(p_data)
+            ds = ds.assign_coords(air_pressure=air_pressure)
+            out_path = froot + f'_{i+1}.nc'
+            profiles.append((out_path, ds))
+
+            ds.to_netcdf(out_path, mode='w', format='NETCDF4')
+
+        return profiles
+    """
 
     def parse_sea_and_sun_L0(self, fpath_L0):
         """
@@ -528,9 +576,9 @@ class CTDProcessor:
             File path to written data.
         """
         if level == 'L1':
-            fpath = os.path.join(self.dpath_L1, f'{self.sensor}_{self.serial_id}_{self.fname_L0}_L1.nc')
+            fpath = os.path.join(self.dpath_L1, f'{self.sensor}_{self.serial_id}_{self.fname}_L1.nc')
         elif level == 'L2':
-            fpath = os.path.join(self.dpath_L2, f'{self.sensor}_{self.serial_id}_{self.fname_L0}_L2.nc')
+            fpath = os.path.join(self.dpath_L2, f'{self.sensor}_{self.serial_id}_{self.fname}_L2.nc')
         else:
             raise ValueError('Writing level must be L1 or L2.')
 
@@ -541,6 +589,52 @@ class CTDProcessor:
 
         return fpath
     
+
+    # ---------- Data Index ----------
+
+    def update_data_index(self):
+        """
+        Update data index after processing new CTD profile.
+
+        Returns
+        -------
+        data_index : pd.DataFrame
+            CTD data index.
+        di_path : str
+            File path to CTD data index.
+        """
+        root = f'Q:/Messdaten/Aphys_Hypothesis_data/{self.lake}/'
+        years = [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]
+
+        di = []
+        for yr in years:
+            root_yr = f'Q:/Messdaten/Aphys_Hypothesis_data/{self.lake}/{yr}/CTD/'
+            dates = os.listdir(root_yr)
+            for date in dates:
+                root_date = os.path.join(root_yr, date)
+                md_files = glob(f'{root_date}/*_md.json')
+                for md_file in md_files:
+                    with open(md_file, 'r') as f:
+                        md = json.load(f)
+
+                    di.append({
+                        'lake': md['lake'],
+                        'date': md['date'],
+                        'time': md['time'],
+                        'profile_loc': md['profile_loc'],
+                        'xsc': md['xsc'],
+                        'ysc': md['ysc'],
+                        'sensor': md['sensor'],
+                        'serial_id': md['serial_id'],
+                        'fname': os.path.basename(md_file).split('_md')[0]
+                    })
+
+        di_path = self.DIPATH.format(lake=self.lake)
+        with open(di_path, 'w') as f:
+            json.dump(di, f, indent=2)
+
+        return pd.DataFrame(di).sort_values(by=['date', 'time'], ascending=True).reset_index(drop=True), di_path
+
 
     # ---------- Pipeline ----------
 
@@ -553,3 +647,4 @@ class CTDProcessor:
         self.fpath_L1 = self.write_to_nc(ds, 'L1')
         ds_qa = self.quality_assurance(ds)
         self.fpath_L2 = self.write_to_nc(ds_qa, 'L2')
+        data_index, di_path = self.update_data_index()
