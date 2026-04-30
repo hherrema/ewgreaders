@@ -1,14 +1,8 @@
 ### Class for reading CTD data
 
 # imports
-import pandas as pd
-import numpy as np
-import xarray as xr
-import pyrsktools as rsk
-import os
 from glob import glob
-
-from .profile_reader import ProfileReader
+import xarray as xr
 
 
 class CTDReader():
@@ -45,7 +39,7 @@ class CTDReader():
             Path to L2 data file.
         """
         dpath_L2 = self.DPATH_L2.format(lake=self.lake, year=self.year, date=self.date)
-        fpaths = glob(f'{dpath_L2}/*{self.fname}*.nc')
+        fpaths = glob(f'{dpath_L2}/*{self.fname}_L2.nc')
 
         if len(fpaths) != 1:
             raise FileNotFoundError('Could not locate single L2 file.')
@@ -55,9 +49,14 @@ class CTDReader():
     
     # ---------- Reading ----------
     
-    def load(self):
+    def load(self, depth_sort=True):
         """
         Load processed (L2) CTD data.
+
+        Parameters
+        ----------
+        depth_sort : bool
+            If True, drop duplicates and sort so depth is monotonic increasing.
 
         Returns
         -------
@@ -66,4 +65,9 @@ class CTDReader():
         """
         fpath_L2 = self.locate_file_L2()
 
-        return xr.open_dataset(fpath_L2)
+        ds = xr.open_dataset(fpath_L2)
+
+        if depth_sort:
+            ds = ds.drop_duplicates('depth').sortby('depth')
+
+        return ds

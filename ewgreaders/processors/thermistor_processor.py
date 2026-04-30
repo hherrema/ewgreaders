@@ -13,11 +13,18 @@ import warnings
 class ThermistorProcessor:
     MD_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_md.json'
     DPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/'
+    DIPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/mooring.json'
     THERMISTORS = ['rbr_temp', 'rbr_duet']
-    COLS_MAP = {'timestamp': 'time', 'temperature': 'temp'}
+    COLS_MAP = {'timestamp': 'time'}
+    VARS_MAP = {'temperature': 'temp', 'pressure': 'press'}
+    VAR_ATTRS = {
+        'time': {'long_name': 'Coordinated Universal Time (UTC)'},
+        'temp': {'units': '°C', 'long_name': 'Temperature'},
+        'press': {'units': 'dbar', 'long_name': 'Pressure'}
+    }
 
     
-    def __init__(self, lake, location, year, date, serial_id):
+    def __init__(self, lake, year, date, location, serial_id):
         """
         Initialize ThermistorProcessor object.
 
@@ -25,21 +32,22 @@ class ThermistorProcessor:
         ----------
         lake : str
             Lake where thermistor is deployed.
-        location : str
-            Location code within lake of thermistor deployment.
         year : str
             Year of thermistor retrieval. 
         date : str
             Date (YYYYMMDD) of thermistor retrieval.
+        location : str
+            Location code within lake of thermistor deployment.
         serial_id : str
             Serial number of thermistor.
         """
         self.lake = lake
-        self.location = location
         self.year = year
         self.date = date
+        self.location = location
         self.serial_id = serial_id
 
+        self.md_file = self.locate_md_file()
         self.sensor = self.get_sensor_type()
         self.depth = self.get_depth()
         self.dpath_L0, self.dpath_L1, self.dpath_L2 = self.locate_data_dirs()
@@ -57,7 +65,7 @@ class ThermistorProcessor:
         md_path : str
             File path to metadata JSON file.
         """
-        return self.MD_PATH.format(lake=self.lake, location=self.location, year=self.year, date=self.date)
+        return self.MD_PATH.format(lake=self.lake, year=self.year, date=self.date, location=self.location)
     
 
     def open_md_file(self):
@@ -103,7 +111,7 @@ class ThermistorProcessor:
         """
         md = self.open_md_file()
         for i in md['instruments']:
-            if i['serial_id'] == self.serial_id and i['instrument'] in self.OXYGEN_LOGGERS:
+            if i['serial_id'] == self.serial_id and i['instrument'] in self.THERMISTORS:
                 return i['mab']
             
         raise ValueError(f'{self.serial_id} sensor not found')
@@ -120,7 +128,7 @@ class ThermistorProcessor:
         """
         md = self.open_md_file()
 
-        return md['depth']
+        return md['lake_depth']
     
     
     def get_depth(self):
@@ -195,9 +203,7 @@ class ThermistorProcessor:
 
             data = data.rename(columns=self.COLS_MAP)
             data = data.set_index('time')
-
             ds = xr.Dataset.from_dataframe(data)
-            ds = ds.assign_coords(depth=self.depth, serial_id=self.serial_id)
         else:
             raise NotImplementedError("Only rbr_temp and rbr_duet sensors are handled.")
         
@@ -206,12 +212,113 @@ class ThermistorProcessor:
     
     # ---------- L1 to L2 ----------
 
+    def organize_data_vars(self, ds):
+        """
+        Rename data variables.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Thermistor data.
+        
+        Returns
+        -------
+        ds : xr.Dataset
+            Thermistor data with desired data variables.
+        """
+        if self.sensor in ['rbr_temp', 'rbr_duet']:
+            vars_map = {k: v for k, v in self.VARS_MAP.items() if k in ds.data_vars}
+        else:
+            raise NotImplementedError('Only rbr_temp and rbr_duet sensors are handled.')
+
+        return ds.rename_vars(vars_map)
+    
+
+    @staticmethod
+    def calculate_depth(press, p_atm=10.1325):
+        """
+        Calculate depth of thermistor from pressure date.
+        Approximate depth = pressure - air pressure
+
+        Parameters
+        ----------
+        press : xr.DataArray
+            Pressure [dbar].
+        p_atm : float
+            Atmospheric pressure [dbar].
+
+        Returns
+        -------
+        depth : xr.DataArray
+            Depth below water surface [m].
+        """
+        air_pressure = press.where(press <= p_atm).min().item()
+        depth = (press - air_pressure).rename('depth')
+        
+        return depth
+
+    
+    
+    def assign_attributes(self, ds):
+        """
+        Assign attributes to data variables and to dataset.
+        Add depth and serial id coordinates.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Thermistor data.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            Thermistor data with attributes.
+        """
+        # data variables
+        for var, attrs in self.VAR_ATTRS.items():
+            if var in ds:
+                ds[var].attrs.update(attrs)
+
+        # dataset
+        md = self.open_md_file()
+        md_xr = {
+            'location': md['mooring'],
+            'xsc': md['xsc'],
+            'ysc': md['ysc'],
+            'lake_depth': md['lake_depth'],
+            'deployment': pd.to_datetime(md['deployment']).date(),
+            'retrieval': pd.to_datetime(md['retrieval']).date(),
+            'sensor': self.sensor,
+            'serial_id': self.serial_id,
+            'depth': self.depth
+        }
+        ds = ds.assign_attrs(md_xr)
+
+        # add depth and serial id coordinates
+        ds = ds.assign_coords(depth=self.depth, serial_id=self.serial_id)
+
+        return ds
+
+
     def quality_assurance(self):
         """
         Run quality assurance on L1 thermistor data.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            L1 thermistor data.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            Processed (L2) thermistor data.
         """
-        raise NotImplementedError
-    
+        ds = self.organize_data_vars(ds)
+        ds['depth'] = self.calculate_depth(ds['press'])
+        ds = self.assign_attributes(ds)
+        
+        return ds
 
 
     # ---------- Writing ----------
@@ -249,14 +356,37 @@ class ThermistorProcessor:
         return fpath
     
 
+    # ---------- Data Index ----------
+
+    def update_data_index(self):
+        """
+        Update data index after processing new thermistor.
+
+        Returns
+        -------
+        data_index : pd.DataFrame
+            Mooring data index.
+        di_path : str
+            File path to mooring data index.
+        """
+        raise NotImplementedError
+    
+
     # ---------- Pipeline ----------
 
-    def process(self):
+    def process(self, update=False):
         """
         Process raw (L0) thermistor data.  Convert to xarray and write to .nc (L1).
         Run quality assurance and write to .nc (L2).
+
+        Parameters
+        ----------
+        update : bool
+            If True, update data index with newly processed data.
         """
         ds = self.parse_L0()
         fpath_L1 = self.write_to_nc(ds, 'L1')
         ds_qa = self.quality_assurance(ds)
         fpath_L2 = self.write_to_nc(ds_qa, 'L2')
+        if update:
+            data_index, di_path = self.update_data_index()

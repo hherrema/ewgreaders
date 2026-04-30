@@ -31,7 +31,7 @@ class CTDProcessor:
         'Redox': 'redox'
     }
     VAR_ATTRS = {
-        'time': {'long_name': 'Coordinated Universal Time (UCT)'},
+        'time': {'long_name': 'Coordinated Universal Time (UTC)'},
         'press': {'units': 'dbar', 'long_name': 'Pressure'},
         'temp': {'units': '°C', 'long_name': 'Temperature'},
         'cond': {'units': 'mS/cm', 'long_name': 'Conductivity'},
@@ -540,6 +540,16 @@ class CTDProcessor:
     def quality_assurance(self, ds):
         """
         Run quality assurance on L1 CTD data.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            L1 CTD data.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            Processed (L2) CTD data.
         """
         ds, air_pressure = self.extract_downcast(ds)
         ds = self.organize_data_vars(ds)
@@ -609,25 +619,31 @@ class CTDProcessor:
         di = []
         for yr in years:
             root_yr = f'Q:/Messdaten/Aphys_Hypothesis_data/{self.lake}/{yr}/CTD/'
+
             dates = os.listdir(root_yr)
-            for date in dates:
-                root_date = os.path.join(root_yr, date)
+            for dt in dates:
+                root_date = os.path.join(root_yr, dt)
+                dp_L2 = os.path.join(self.DPATH.format(lake=self.lake, year=yr, date=dt), 'L2')
+
                 md_files = glob(f'{root_date}/*_md.json')
                 for md_file in md_files:
-                    with open(md_file, 'r') as f:
-                        md = json.load(f)
+                    fn = os.path.basename(md_file).split('_md')[0]
+                    fp_L2 = glob(f'{dp_L2}/*{fn}*')
+                    if len(fp_L2) == 1:
+                        with open(md_file, 'r') as f:
+                            md = json.load(f)
 
-                    di.append({
-                        'lake': md['lake'],
-                        'date': md['date'],
-                        'time': md['time'],
-                        'profile_loc': md['profile_loc'],
-                        'xsc': md['xsc'],
-                        'ysc': md['ysc'],
-                        'sensor': md['sensor'],
-                        'serial_id': md['serial_id'],
-                        'fname': os.path.basename(md_file).split('_md')[0]
-                    })
+                        di.append({
+                            'lake': md['lake'],
+                            'date': md['date'],
+                            'time': md['time'],
+                            'profile_loc': md['profile_loc'],
+                            'xsc': md['xsc'],
+                            'ysc': md['ysc'],
+                            'sensor': md['sensor'],
+                            'serial_id': md['serial_id'],
+                            'fname': fn
+                        })
 
         di_path = self.DIPATH.format(lake=self.lake)
         with open(di_path, 'w') as f:
@@ -638,13 +654,19 @@ class CTDProcessor:
 
     # ---------- Pipeline ----------
 
-    def process(self):
+    def process(self, update=False):
         """
         Process raw (L0) CTD data.  Convert to xarray and write to .nc (L1).
         Run quality assurance and write to .nc (L2).
+
+        Parameters
+        ----------
+        update : bool
+            If True, update data index with newly processed profile.
         """
         ds, self.fpath_L0 = self.parse_L0()
         self.fpath_L1 = self.write_to_nc(ds, 'L1')
         ds_qa = self.quality_assurance(ds)
         self.fpath_L2 = self.write_to_nc(ds_qa, 'L2')
-        data_index, di_path = self.update_data_index()
+        if update:
+            data_index, di_path = self.update_data_index()
