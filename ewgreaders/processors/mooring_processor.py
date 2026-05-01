@@ -3,18 +3,28 @@
 # imports
 import json
 import os
+from glob import glob
+import xarray as xr
+import pandas as pd
+import numpy as np
+import scipy
+import pyrsktools as rsk
+import dolfyn as dlfn
+import warnings
 
 
 class MooringProcessor:
     MD_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_md.json'
     BATHY_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/bathymetry.nc'
     DPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/'
+    DT_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_dt.csv'
     ADCPS = ['adcp']
     THERMISTORS = ['rbr_temp', 'rbr_duet']
     OXYGEN_LOGGERS = ['minidot', 'rbr_do']
+    COLS_MAP_RBR_DUET = {'timestamp': 'time'}
 
 
-    def __init__(self, lake, location, year, date):
+    def __init__(self, lake, year, date, location):
         """
         Initialize MooringProcessor object.
         
@@ -22,17 +32,20 @@ class MooringProcessor:
         ----------
         lake : str
             Lake where mooring is deployed.
-        location : str
-            Location code within lake of mooring deployment.
         year : str
             Year of mooring retrieval.
         date : str
             Date (YYYYMMDD) of mooring retrieval.
+        location : str
+            Location code within lake of mooring deployment.
         """
         self.lake = lake
-        self.location = location
         self.year = year
         self.date = date
+        self.location = location
+
+        self.md_file = self.locate_md_file()
+        self.dpath_L0, self.dpath_L1, self.dpath_L2 = self.locate_data_dirs()
 
 
     # ---------- Metadata ----------
@@ -46,7 +59,7 @@ class MooringProcessor:
         md_path : str
             File path to metadata JSON file.
         """
-        return self.MD_PATH.format(lake=self.lake, location=self.location, year=self.year, date=self.date)
+        return self.MD_PATH.format(lake=self.lake, year=self.year, date=self.date, location=self.location)
     
 
     def open_md_file(self):
@@ -62,7 +75,43 @@ class MooringProcessor:
             md = json.load(f)
 
         return md
+    
 
+    def get_total_depth(self):
+        """
+        Parse metadata file for lake depth at mooring location.
+        
+        Returns
+        -------
+        total_depth : float
+            Lake depth at mooring location.
+        """
+        md = self.open_md_file()
+
+        return md['lake_depth']
+
+
+    def get_instruments(self, pandas=False):
+        """
+        Parse metadata file for all instruments.
+
+        Parameters
+        ----------
+        pandas : bool
+            If True, return pandas DataFrame.
+
+        Returns
+        -------
+        instruments : list
+            Metadata dictionaries for all instruments on mooring.
+        """
+        md = self.open_md_file()
+
+        if pandas:
+            return pd.DataFrame(md['instruments'])
+        else:
+            return md['instruments']
+        
 
     def get_adcps(self):
         """
@@ -74,6 +123,7 @@ class MooringProcessor:
             Metadata dictionaries for all ADCPs on mooring.
         """
         md = self.open_md_file()
+
         return [i for i in md['instruments'] if i['instrument'] == 'adcp']
     
 
@@ -87,6 +137,7 @@ class MooringProcessor:
             Metadata dictionaries for all thermistors on mooring.
         """
         md = self.open_md_file()
+
         return [i for i in md['instruments'] if i['instrument'] in self.THERMISTORS]
     
 
@@ -100,25 +151,11 @@ class MooringProcessor:
             Metadata dictionaries for all oxygen loggers on mooring.
         """
         md = self.open_md_file()
+
         return [i for i in md['instruments'] if i['instrument'] in self.OXYGEN_LOGGERS]
     
 
-    def get_sensor_type(self, serial_id):
-        """
-        Parse metadata file for sensor type.
-
-        Returns
-        -------
-        sensor : str
-            Type of sensor.
-        """
-        md = self.open_md_file()
-        for i in md['instruments']:
-            if i['serial_id'] == self.serial_id and i['instrument'] in self.ADCPS + self.THERMISTORS + self.OXYGEN_LOGGERS:
-                return i['instrument']
-            
-        raise ValueError(f'{self.serial_id} sensor not found')
-    
+    # ---------- Navigation ----------
 
     def locate_data_dirs(self):
         """
@@ -133,6 +170,222 @@ class MooringProcessor:
         dpath_L2 : str
             Path to L2 data directory.
         """
-        dpath = self.DPATH.format(lake=self.lake, location=self.location, year=self.year, date=self.date)
+        dpath = self.DPATH.format(lake=self.lake, year=self.year, date=self.date, location=self.location)
 
         return os.path.join(dpath, 'L0'), os.path.join(dpath, 'L1'), os.path.join(dpath, 'L2')
+    
+
+    def locate_file_L0_rbr_duet(self, serial_id):
+        """
+        Locate file with raw (L0) rbr_duet thermistor data.
+
+        Parameters
+        ----------
+        serial_id : str
+            Thermistor serial ID.
+
+        Returns
+        -------
+        fpath_L0 : str
+            Path to L0 data file.
+        """
+        fpaths = glob(f'{self.dpath_L0}/*{serial_id}*.rsk')
+        
+        if len(fpaths) != 1:
+            raise IndexError(f'Could not find single data file for {serial_id}.')
+        
+        return fpaths[0]
+    
+
+    def locate_file_L0_adcp(self, serial_id):
+        """
+        Locate file with raw (L0) ADCP data.
+
+        Parameters
+        ----------
+        serial_id : str
+            ADCP serial ID.
+
+        Returns
+        -------
+        fpath_L0 : str
+            Path to L0 data file.
+        """
+        fpaths = glob(f'{self.dpath_L0}/*{serial_id}*.000')
+        
+        if len(fpaths) != 1:
+            raise IndexError(f'Could not find single data file for {serial_id}.')
+        
+        return fpaths[0]
+
+    
+
+    # ---------- L0 ----------
+
+    def parse_L0_rbr_duet(self, serial_id):
+        """
+        Load raw (L0) rbr_duet thermistor data into xarray Dataset.
+
+        Parameters
+        ----------
+        serial_id : str
+            Thermistor serial ID.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            Dataset of data recorded by thermistor.
+        """
+        fpath_L0 = self.locate_file_L0_rbr_duet(serial_id)
+
+        
+        with rsk.RSK(fpath_L0) as f:
+            f.readdata()
+            data = pd.DataFrame(f.data)
+
+        data = data.rename(columns=self.COLS_MAP_RBR_DUET)
+        data = data.set_index('time')
+        
+        return xr.Dataset.from_dataframe(data)
+    
+
+    def parse_L0_adcp(self, serial_id):
+        """
+        Load raw (L0) ADCP data into xarray Dataset.
+
+        Parameters
+        ----------
+        serial_id : str
+            ADCP serial ID.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            Dataset of data recorded by ADCP.
+        """
+        fpath_L0 = self.locate_file_L0_adcp(serial_id)
+
+        return dlfn.read(fpath_L0)
+    
+
+    # ---------- Depth Regression ----------
+
+    @staticmethod
+    def calculate_depth_rbr_duet(press, p_atm=10.1325):
+        """
+        Calculate depth of thermistor from pressure date.
+        Approximate depth = pressure - air pressure.
+        Median depth approximates given thermistor records primarily in water.
+
+        Parameters
+        ----------
+        press : xr.DataArray
+            Pressure [dbar].
+        p_atm : float
+            Atmospheric pressure [dbar].
+
+        Returns
+        -------
+        depth : xr.DataArray
+            Depth below water surface [m].
+        """
+        air_pressure = press.where(press <= p_atm).min().item()
+        depth = (press - air_pressure).rename('depth')
+
+        return depth.median().item()
+
+
+    @staticmethod
+    def calculate_depth_adcp(ds):
+        """
+        Calculate depth from ADCP readings.  
+        Median depth approximates given ADCP records primarily in water.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            ADCP data.
+
+        Returns
+        -------
+        depth : float
+            Depth below water surface [m].
+        """
+        # check if ADCP reads pressure (i.e., depth)
+        if 'pressure' in ds.data_vars and (ds['pressure'] != 0).any() and ds['depth'].std() > 0:
+            return ds['depth'].median().item()
+        else:
+            raise KeyError('ADCP does not measure depth.')
+        
+
+    def create_depth_table(self):
+        """
+        Extract depths from instruments on moorings with pressure sensors (RBR duet, ADCP).
+        Run linear regression to determine depths of other sensors.
+
+        Returns
+        -------
+        depth_table : pd.DataFrame
+            Depths [m] of mooring instruments.
+        """
+        total_depth = self.get_total_depth()
+        instruments = self.get_instruments()
+
+        # extract sensor depths
+        depth_table = []
+        for i in instruments:
+            if i['instrument'] == 'rbr_duet':
+                ds = self.parse_L0_rbr_duet(i['serial_id'])
+                depth_sensor = self.calculate_depth_rbr_duet(ds['pressure'])
+            elif i['instrument'] == 'adcp':
+                ds = self.parse_L0_adcp(i['serial_id'])
+                try:
+                    depth_sensor = self.calculate_depth_adcp(ds)
+                except BaseException:
+                    depth_sensor = np.nan
+            else:
+                depth_sensor = np.nan
+
+            depth_table.append({
+                'instrument': i['instrument'],
+                'serial_id': i['serial_id'],
+                'depth_md': total_depth - i['mab'],
+                'depth_sensor': depth_sensor
+            })
+
+        depth_table = pd.DataFrame(depth_table)
+
+        # use sensor values for instruments at same depth (mean is really taking the non-NaN entry)
+        depth_table['depth_sensor'] = depth_table.groupby('depth_md')['depth_sensor'].transform('mean')
+        
+        # vertical translation
+        if depth_table['depth_sensor'].nunique() == 1:
+            warnings.warn("Only 1 sensor depth, applying vertical translation.")
+            b = (depth_table['depth_sensor'] - depth_table['depth_md']).mean()
+            depth_table['depth_t'] = depth_table['depth_md'] + b
+            depth_table['depth'] = depth_table['depth_sensor'].fillna(depth_table['depth_t']).round(1)
+
+        # linear regression
+        elif depth_table['depth_sensor'].nunique() > 1:
+            m, b, _, _, _ = scipy.stats.linregress(depth_table.depth_md, depth_table.depth_sensor, nan_policy='omit')
+            depth_table['depth_lr'] = m * depth_table['depth_md'] + b
+            depth_table['depth'] = depth_table['depth_sensor'].fillna(depth_table['depth_lr']).round(1)
+
+        else:
+            raise ValueError('No sensor depths, regression not calculated.')
+
+        return depth_table
+    
+
+    def write_depth_table(self, depth_table):
+        """
+        Write table with instrument depths to .csv.
+
+        Parameters
+        ----------
+        depth_table : pd.DataFrame
+            Depths [m] of mooring instruments.
+        """
+        dt_path = self.DT_PATH.format(lake=self.lake, year=self.year, date=self.date, location=self.location)
+
+        depth_table.to_csv(dt_path, index=False)

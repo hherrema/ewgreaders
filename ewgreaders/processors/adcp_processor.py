@@ -253,7 +253,7 @@ class ADCPProcessor:
         return ds
 
     
-    # ---------- L1 to L2 ----------
+    # ---------- L1 to L2 ----------        
 
     def calculate_depth(self, ds):
         """
@@ -290,7 +290,10 @@ class ADCPProcessor:
 
         # check if ADCP range reaches lake surface or bottom
         total_depth = self.get_total_depth()
-        self.surfbot = (ds['depth'].max().item() >= total_depth) | (ds['depth'].min().item() <= 0)
+        if self.orientation == 'up':
+            self.surfbot = ds['depth'].min().item() <= 0
+        elif self.orientation == 'down':
+            self.surfbot = ds['depth'].max().item() >= total_depth
 
         return ds
         
@@ -333,7 +336,7 @@ class ADCPProcessor:
         # data variables
         for var, attrs in self.VAR_ATTRS.items():
             if var in ds:
-                ds[var].attrs.update(attrs)
+                ds[var].attrs = attrs
 
         # dataset
         md = self.open_md_file()
@@ -594,6 +597,7 @@ class ADCPProcessor:
         corr_stdev = corr.std(dim='beam')
 
         return ds.where(corr_stdev <= stdev_thresh)
+    
 
     def quality_assurance(self, ds):
         """
