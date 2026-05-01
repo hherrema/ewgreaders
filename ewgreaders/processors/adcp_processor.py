@@ -13,6 +13,7 @@ import warnings
 
 class ADCPProcessor:
     MD_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_md.json'
+    DT_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_dt.csv'
     DPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/'
     DIPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/mooring.json'
     ADCPS = ['adcp']
@@ -162,19 +163,30 @@ class ADCPProcessor:
         return md['lake_depth']
     
     
-    def get_depth(self):
+    def get_depth(self, dt=True):
         """
-        Calculate depth from total depth and mab metadata.
+        Parse depth table for instrument depth.
+
+        Parameters
+        ----------
+        dt : bool
+            If False, calculate depth from total depth and mab metadata.
 
         Returns
         -------
         depth : float
             Depth [m] of sensor.
         """
-        mab = self.get_mab()
-        total_depth = self.get_total_depth()
+        if dt:
+            dt_path = self.DT_PATH.format(lake=self.lake, year=self.year, date=self.date, location=self.location)
+            depth_table = pd.read_csv(dt_path, dtype={'serial_id': str})
+            depth = depth_table[depth_table['serial_id'] == self.serial_id].iloc[0].depth
+        else:
+            mab = self.get_mab()
+            total_depth = self.get_total_depth()
+            depth = total_depth - mab
 
-        return total_depth - mab
+        return depth
     
 
     def get_orientation(self):
@@ -257,8 +269,7 @@ class ADCPProcessor:
 
     def calculate_depth(self, ds):
         """
-        Calculate depth from ADCP readings.  
-        Median depth approximates given ADCP records primarily in water.
+        Calculate depth from ADCP depth and range bins.  
         Change depth data variable to z, assign depth coordinate, swap range dimension for depth.
 
         Parameters
@@ -271,12 +282,6 @@ class ADCPProcessor:
         ds : xr.Dataset
             ADCP data with depth dimension.
         """
-        # check if ADCP reads pressure (i.e., depth)
-        if 'pressure' in ds.data_vars and (ds['pressure'] != 0).any() and ds['depth'].std() > 0:
-            self.depth = ds['depth'].median().item()
-        else:
-            raise NotImplementedError('ADCP does not measure depth, implement depth regression.')
-        
         ds = ds.rename({'depth': 'z'})
         
         if self.orientation == 'up':

@@ -12,6 +12,7 @@ import warnings
 
 class ThermistorProcessor:
     MD_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_md.json'
+    DT_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_dt.csv'
     DPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/'
     DIPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/mooring.json'
     THERMISTORS = ['rbr_temp', 'rbr_duet']
@@ -131,19 +132,30 @@ class ThermistorProcessor:
         return md['lake_depth']
     
     
-    def get_depth(self):
+    def get_depth(self, dt=True):
         """
-        Calculate depth from total depth and mab metadata.
+        Parse depth table for instrument depth.
+
+        Parameters
+        ----------
+        dt : bool
+            If False, calculate depth from total depth and mab metadata.
 
         Returns
         -------
         depth : float
             Depth [m] of sensor.
         """
-        mab = self.get_mab()
-        total_depth = self.get_total_depth()
+        if dt:
+            dt_path = self.DT_PATH.format(lake=self.lake, year=self.year, date=self.date, location=self.location)
+            depth_table = pd.read_csv(dt_path, dtype={'serial_id': str})
+            depth = depth_table[depth_table['serial_id'] == self.serial_id].iloc[0].depth
+        else:
+            mab = self.get_mab()
+            total_depth = self.get_total_depth()
+            depth = total_depth - mab
 
-        return total_depth - mab
+        return depth
     
 
     # ---------- Navigation ----------
