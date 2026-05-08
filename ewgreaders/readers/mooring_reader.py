@@ -1,7 +1,6 @@
 ### Base class for reading mooring data
 
 # imports
-import os
 import json
 from datetime import datetime
 import xarray as xr
@@ -10,12 +9,14 @@ import pandas as pd
 
 class MooringReader:
     MD_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_md.json'
+    DT_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_dt.csv'
     BATHY_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/bathymetry.nc'
     DPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/'
+    ADCPS = ['adcp']
     THERMISTORS = ['rbr_temp', 'rbr_duet']
     OXYGEN_LOGGERS = ['minidot', 'rbr_do']
 
-    def __init__(self, lake, location, year, date, datalakes=False):
+    def __init__(self, lake, year, date, location):
         """
         Initialize MooringReader object.
 
@@ -23,26 +24,25 @@ class MooringReader:
         ----------
         lake : str
             Lake where mooring is deployed.
-        location : str
-            Location code within lake of mooring deployment.
         year : str
             Year of mooring retrieval.
         date : str
             Date (YYYYMMDD) of mooring retrieval.
-        datalakes : bool
-            Toggle whether to read from Eawag drive or DataLakes.
+        location : str
+            Location code within lake of mooring deployment.
         """
         self.lake = lake
-        self.location = location
         self.year = year
         self.date = date
-        self.datalakes = datalakes
+        self.location = location
 
         self.md_file = self.locate_md_file()
-        self.md = self.open_md_file()
-        self.total_depth = self.get_total_depth()
-        
-        self.dpath_L0, self.dpath_L1, self.dpath_L2 = self.locate_data_dirs()
+        self.deploy, self.retrieve = self.get_deploy_retrieve_dates()
+        self.xsc, self.ysc = self.get_swiss_coords()
+
+
+    # ---------- Metadata ----------
+
 
 
     def locate_md_file(self):
@@ -54,7 +54,7 @@ class MooringReader:
         md_path : str
             File path to metadata JSON file.
         """
-        return self.MD_PATH.format(lake=self.lake, location=self.location, year=self.year, date=self.date)
+        return self.MD_PATH.format(lake=self.lake, year=self.year, date=self.date, location=self.location)
     
     
     def open_md_file(self):
@@ -72,23 +72,24 @@ class MooringReader:
         return md
     
 
-    def locate_data_dirs(self):
+    def get_deploy_retrieve_dates(self):
         """
-        Locate data directories for L0, L1, and L2 data.
+        Parse metadata file for depolyment and retrieval dates.
 
         Returns
         -------
-        dpath_L0 : str
-            Path to L0 data directory.
-        dpath_L1 : str
-            Path to L1 data directory.
-        dpath_L2 : str
-            Path to L2 data directory.
+        deploy : datetime
+            Date of mooring deployment.
+        retrieve : datetime
+            Date of mooring retrieval.
         """
-        dpath = self.DPATH.format(lake=self.lake, location=self.location, year=self.year, date=self.date)
+        md = self.open_md_file()
 
-        return os.path.join(dpath, 'L0'), os.path.join(dpath, 'L1'), os.path.join(dpath, 'L2')
+        deploy = datetime.strptime(md['deployment'], '%d.%m.%Y').date()
+        retrieve = datetime.strptime(md['retrieval'], '%d.%m.%Y').date()
 
+        return deploy, retrieve
+    
 
     def get_swiss_coords(self, oom=True):
         """
@@ -106,8 +107,10 @@ class MooringReader:
         ysc : int
             Latitude coordinate.
         """
-        xsc = self.md['longitude']
-        ysc = self.md['latitude']
+        md = self.open_md_file()
+
+        xsc = md['xsc']
+        ysc = md['ysc']
 
         if oom:
             xsc = int(xsc + 2e6)
@@ -115,64 +118,31 @@ class MooringReader:
 
         return xsc, ysc
     
-    
-    def get_total_depth(self):
-        """
-        Parse metadata file for total depth at mooring location.
 
-        Returns
-        -------
-        total_depth : int
-            Depth [m] of lake at mooring locaton.
+    def get_total_depth(self, from_bathy=False):
         """
-        return self.md['depth']
-    
-
-    def set_total_depth(self, total_depth=None):
-        """
-        Set depth of lake at position of mooring.
+        Parse metadata file for lake depth at mooring location.
 
         Parameters
         ----------
+        from_bathy : bool
+            If True, get total depth from bathymetry file.
+        
+        Returns
+        -------
         total_depth : float
-            Depth of lake at mooring position, calculated manually.
+            Lake depth at mooring location.
         """
-        if not total_depth:
-            bathy = xr.open_dataset(self.bathy_file)
+        if from_bathy:
+            bathy = xr.open_dataset(self.BATHY_PATH.formate(lake=self.lake))
             total_depth = bathy.sel(xsc=self.xsc, ysc=self.ysc).depth.item()
+        else:
+            md = self.open_md_file()
+            total_depth = md['lake_depth']
 
         return total_depth
-    
 
-    def get_rope_extension_prcnt(self):
-        """
-        Parse metadata file for rope extension percentage.  Rope extneds under weight of mooring.
 
-        Returns
-        -------
-        rope_extension_prcnt : int
-            Precentage to increase every 5 m interval by.
-        """
-        return self.md['rope_extension_prcnt']
-    
-
-    def get_deploy_retrieve_dates(self):
-        """
-        Parse metadata file for depolyment and retrieval dates.
-
-        Returns
-        -------
-        deploy : datetime
-            Date of mooring deployment.
-        retrieve : datetime
-            Date of mooring retrieval.
-        """
-        deploy = datetime.strptime(self.md['deployment'], '%d.%m.%Y').date()
-        retrieve = datetime.strptime(self.md['retrieval'], '%d.%m.%Y').date()
-
-        return deploy, retrieve
-    
-    
     def get_instruments(self, pandas=False):
         """
         Parse metadata file for all instruments.
@@ -187,11 +157,13 @@ class MooringReader:
         instruments : list
             Metadata dictionaries for all instruments on mooring.
         """
+        md = self.open_md_file()
+
         if pandas:
-            return pd.DataFrame(self.md['instruments'])
+            return pd.DataFrame(md['instruments'])
         else:
-            return self.md['instruments']
-    
+            return md['instruments']
+        
 
     def get_adcps(self):
         """
@@ -202,7 +174,9 @@ class MooringReader:
         adcps : list
             Metadata dictionaries for all ADCPs on mooring.
         """
-        return [i for i in self.md['instruments'] if i['instrument'] == 'adcp']
+        md = self.open_md_file()
+
+        return [i for i in md['instruments'] if i['instrument'] == 'adcp']
     
 
     def get_thermistors(self):
@@ -214,7 +188,9 @@ class MooringReader:
         thermistors : list
             Metadata dictionaries for all thermistors on mooring.
         """
-        return [i for i in self.md['instruments'] if i['instrument'] in self.THERMISTORS]
+        md = self.open_md_file()
+
+        return [i for i in md['instruments'] if i['instrument'] in self.THERMISTORS]
     
 
     def get_oxygen_loggers(self):
@@ -226,74 +202,15 @@ class MooringReader:
         oxygen_loggers : list
             Metadata dictionaries for all oxygen loggers on mooring.
         """
-        return [i for i in self.md['instruments'] if i['instrument'] in self.OXYGEN_LOGGERS]
+        md = self.open_md_file()
 
-
-    def get_mab(self):
-        """
-        Parse metadata file for meters above bottom of instrument.
-        """
-        raise NotImplementedError("Subclasses must implement method.")
+        return [i for i in md['instruments'] if i['instrument'] in self.OXYGEN_LOGGERS]
     
 
-    def set_depth(self):
-        """"
-        Set depth of instrument.
-        """
-        raise NotImplementedError("Subclasses must implement method.")
-    
+    # ---------- Reading ----------
 
-    def extract_sensor_depths(self):
-        """
-        Extract depths from instruments on moorings with pressure sensors (RBR duet, ADCP).
-
-        Returns
-        -------
-        sensor_depths : pd.DataFrame
-            Depths for instruments with pressure sensors.
-        """
-        # import subclasses within method to avoid circular imports
-        from .thermistor_reader import ThermistorReader
-        from .adcp_reader import ADCPReader
-
-        sensor_depths = []
-        instruments = self.get_instruments()
-        for i in instruments:
-            try:
-                if i['instrument'] == 'rbr_duet':
-                    treader = ThermistorReader(i['serial_id'], self.lake, self.location, self.year, self.date)
-                    ds = treader.load_from_L0()
-                    depth, pressure, air_pressure = treader.calculate_rbr_duet_depth(ds)
-                    sensor_depths.append({
-                        'instrument': i['instrument'],
-                        'serial_id': i['serial_id'],
-                        'depth_sensor': depth,
-                        'pressure': pressure,
-                        'air_pressure': air_pressure,
-                        'depth_md': treader.total_depth - i['mab']
-                    })
-                
-                elif i['instrument'] == 'adcp':
-                    areader = ADCPReader(i['serial_id'], self.lake, self.location, self.year, self.date)
-                    ds = areader.load_from_L0()
-                    if ds and 'pressure' in ds.data_vars and ds.pressure.mean().item() != 0:
-                        depth = ds.where(ds.depth != 0).depth.median().item()
-                        sensor_depths.append({
-                            'instrument': i['instrument'],
-                            'serial_id': i['serial_id'],
-                            'depth_sensor': depth,
-                            'depth_md': areader.total_depth - i['mab']
-                        })
-            except IndexError:    # can't find data file for instrument
-                continue
-
-        if len(sensor_depths) == 0:
-            raise ValueError('No instruments on mooring have pressure sensors.')
-        
-        return pd.DataFrame(sensor_depths)
-        
-
-    def create_instrument_chain(self, datasets):
+    @staticmethod
+    def create_instrument_chain(datasets):
         """
         Concatenate individual instrument data into single Dataset with all instruments.
         Works for thermistors and oxygen loggers.

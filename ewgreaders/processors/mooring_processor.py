@@ -2,6 +2,7 @@
 
 # imports
 import json
+from datetime import datetime
 import os
 from glob import glob
 import xarray as xr
@@ -46,6 +47,8 @@ class MooringProcessor:
 
         self.md_file = self.locate_md_file()
         self.dpath_L0, self.dpath_L1, self.dpath_L2 = self.locate_data_dirs()
+        self.deploy, self.retrieve = self.get_deploy_retrieve_dates()
+        self.xsc, self.ysc = self.get_swiss_coords()
 
 
     # ---------- Metadata ----------
@@ -77,18 +80,75 @@ class MooringProcessor:
         return md
     
 
-    def get_total_depth(self):
+    def get_deploy_retrieve_dates(self):
+        """
+        Parse metadata file for depolyment and retrieval dates.
+
+        Returns
+        -------
+        deploy : datetime
+            Date of mooring deployment.
+        retrieve : datetime
+            Date of mooring retrieval.
+        """
+        md = self.open_md_file()
+
+        deploy = datetime.strptime(md['deployment'], '%d.%m.%Y').date()
+        retrieve = datetime.strptime(md['retrieval'], '%d.%m.%Y').date()
+
+        return deploy, retrieve
+    
+
+    def get_swiss_coords(self, oom=True):
+        """
+        Parse metadata file for Swiss coordinates of mooring location.
+
+        Parameters
+        ----------
+        oom : bool
+            Toggle to add order of magnitude (2, 1) to (x, y) coordinates.
+
+        Returns
+        -------
+        xsc : int
+            Longitude coordinate.
+        ysc : int
+            Latitude coordinate.
+        """
+        md = self.open_md_file()
+
+        xsc = md['xsc']
+        ysc = md['ysc']
+
+        if oom:
+            xsc = int(xsc + 2e6)
+            ysc = int(ysc + 1e6)
+
+        return xsc, ysc
+    
+
+    def get_total_depth(self, from_bathy=False):
         """
         Parse metadata file for lake depth at mooring location.
+
+        Parameters
+        ----------
+        from_bathy : bool
+            If True, get total depth from bathymetry file.
         
         Returns
         -------
         total_depth : float
             Lake depth at mooring location.
         """
-        md = self.open_md_file()
+        if from_bathy:
+            bathy = xr.open_dataset(self.BATHY_PATH.formate(lake=self.lake))
+            total_depth = bathy.sel(xsc=self.xsc, ysc=self.ysc).depth.item()
+        else:
+            md = self.open_md_file()
+            total_depth = md['lake_depth']
 
-        return md['lake_depth']
+        return total_depth
 
 
     def get_instruments(self, pandas=False):
@@ -238,7 +298,6 @@ class MooringProcessor:
         """
         fpath_L0 = self.locate_file_L0_rbr_duet(serial_id)
 
-        
         with rsk.RSK(fpath_L0) as f:
             f.readdata()
             data = pd.DataFrame(f.data)

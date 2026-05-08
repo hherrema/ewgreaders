@@ -13,6 +13,7 @@ import warnings
 class O2Processor:
     MD_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_md.json'
     DT_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_dt.csv'
+    BATHY_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/bathymetry.nc'
     DPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/'
     DIPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/mooring.json'
     OXYGEN_LOGGERS = ['minidot', 'rbr_do']
@@ -31,10 +32,13 @@ class O2Processor:
         'time': {'long_name': 'Coodinated Universal Time (UTC)'},
         'do2_conc': {'units': 'mg/l', 'long_name': 'Dissolved Oxygen Concentration'},
         'do2_sat': {'units': '%', 'long_name': 'Dissolved Oxygen Saturation'},
+        'temp': {'units': '°C', 'long_name': 'Temperature'},
+        'depth': {'units': 'm', 'long_name': 'Depth'},
+        'serial_id': {'long_name': 'Serial ID'}
     }
 
 
-    def __init__(self, lake, year, date, location, serial_id):
+    def __init__(self, lake, year, date, location, serial_id, t_offset=None):
         """
         Initialize O2Processor object.
 
@@ -50,18 +54,20 @@ class O2Processor:
             Location code within lake of oxygen logger deployment.
         serial_id : str
             Serial number of oxygen logger.
+        t_offset : str
+            Time offset from sensor clock to correct time (e.g., +/-HH:MM:SS).
         """
         self.lake = lake
         self.year = year
         self.date = date
         self.location = location
         self.serial_id = serial_id
+        self.t_offset = t_offset
 
         self.md_file = self.locate_md_file()
         self.sensor = self.get_sensor_type()
         self.depth = self.get_depth()
-        self.dpath_L0, self.dpath_L1, self.dpath_L2 = self.locate_data_dirs()
-        
+        self.dpath_L0, self.dpath_L1, self.dpath_L2 = self.locate_data_dirs()    
 
     
     # ---------- Metadata ----------
@@ -91,6 +97,34 @@ class O2Processor:
             md = json.load(f)
 
         return md
+    
+
+    def get_swiss_coords(self, oom=True):
+        """
+        Parse metadata file for Swiss coordinates of mooring location.
+
+        Parameters
+        ----------
+        oom : bool
+            Toggle to add order of magnitude (2, 1) to (x, y) coordinates.
+
+        Returns
+        -------
+        xsc : int
+            Longitude coordinate.
+        ysc : int
+            Latitude coordinate.
+        """
+        md = self.open_md_file()
+
+        xsc = md['xsc']
+        ysc = md['ysc']
+
+        if oom:
+            xsc = int(xsc + 2e6)
+            ysc = int(ysc + 1e6)
+
+        return xsc, ysc
     
 
     def get_sensor_type(self):
@@ -127,18 +161,29 @@ class O2Processor:
         raise ValueError(f'{self.serial_id} sensor not found')
     
     
-    def get_total_depth(self):
+    def get_total_depth(self, from_bathy=False):
         """
         Parse metadata file for lake depth at mooring location.
+
+        Parameters
+        ----------
+        from_bathy : bool
+            If True, get total depth from bathymetry file.
         
         Returns
         -------
         total_depth : float
             Lake depth at mooring location.
         """
-        md = self.open_md_file()
+        if from_bathy:
+            bathy = xr.open_dataset(self.BATHY_PATH.formate(lake=self.lake))
+            xsc, ysc = self.get_swiss_coords()
+            total_depth = bathy.sel(xsc=xsc, ysc=ysc).depth.item()
+        else:
+            md = self.open_md_file()
+            total_depth = md['lake_depth']
 
-        return md['lake_depth']
+        return total_depth
     
     
     def get_depth(self, dt=True):
@@ -161,7 +206,7 @@ class O2Processor:
             depth = depth_table[depth_table['serial_id'] == self.serial_id].iloc[0].depth
         else:
             mab = self.get_mab()
-            total_depth = self.get_total_depth()
+            total_depth = self.get_total_depth(from_bathy=True)
             depth = total_depth - mab
 
         return depth
@@ -277,8 +322,6 @@ class O2Processor:
         -------
         ds : xr.Dataset
             Dataset of data recorded by oxygen logger.
-        fpath_L0 : str
-            File path to raw (L0) oxygen logger data.
         """
         fpath_L0 = self.locate_file_L0()
 
@@ -292,7 +335,7 @@ class O2Processor:
         data = data.set_index('time')
         ds = xr.Dataset.from_dataframe(data)
 
-        return ds, fpath_L0
+        return ds
 
     
     # ---------- L1 to L2 ----------
@@ -335,6 +378,9 @@ class O2Processor:
         ds : xr.Dataset
             Oxygen logger data with attributes.
         """
+        # add depth and serial id coordinates
+        ds = ds.assign_coords(depth=self.depth, serial_id=self.serial_id)
+        
         # data variables
         for var, attrs in self.VAR_ATTRS.items():
             if var in ds:
@@ -347,16 +393,55 @@ class O2Processor:
             'xsc': md['xsc'],
             'ysc': md['ysc'],
             'lake_depth': md['lake_depth'],
-            'deployment': pd.to_datetime(md['deployment']).date(),
-            'retrieval': pd.to_datetime(md['retrieval']).date(),
+            'bathy_depth': self.get_total_depth(from_bathy=True),
+            'deployment': md['deployment'],
+            'retrieval': md['retrieval'],
             'sensor': self.sensor,
             'serial_id': self.serial_id,
-            'depth': self.depth
+            'depth': self.depth,
+            't_offset': str(self.t_offset)
         }
         ds = ds.assign_attrs(md_xr)
 
-        # add depth and serial id coordinates
-        ds = ds.assign_coords(depth=self.depth, serial_id=self.serial_id)
+        return ds
+    
+    
+    def derive_vars(self, ds):
+        """
+        Process L1 oxygen logger data to organize variables and assign attributes.
+        
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Oxygen logger data.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            Processed oxygen logger data.
+        """
+        ds = self.organize_data_vars(ds)
+        ds = self.assign_attributes(ds)
+
+        return ds
+    
+
+    def correct_clock_offset(self, ds):
+        """
+        Apply correction to sensor clock offset.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            Oxygen logger data.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            Oxygen logger data with corrected time dimension.
+        
+        """
+        ds['time'] = ds['time'] + pd.to_timedelta(self.t_offset)
 
         return ds
     
@@ -373,10 +458,10 @@ class O2Processor:
         Returns
         -------
         ds : xr.Dataset
-            Processed (L2) oxygen logger data.
+            Quality assured (L2) oxygen logger data.
         """
-        ds = self.organize_data_vars(ds)
-        ds = self.assign_attributes(ds)
+        if self.t_offset:
+            ds = self.correct_clock_offset(ds)
         
         return ds
     
@@ -444,9 +529,15 @@ class O2Processor:
         update : bool
             If True, update data index with newly processed data.
         """
+        # L0 to L1
         ds = self.parse_L0()
         fpath_L1 = self.write_to_nc(ds, 'L1')
-        ds_qa = self.quality_assurance(ds)
-        fpath_L2 = self.write_to_nc(ds_qa, 'L2')
+
+        # L1 to L2
+        ds = self.derive_vars(ds)
+        ds = self.quality_assurance(ds)
+        fpath_L2 = self.write_to_nc(ds, 'L2')
+
+        # data index
         if update:
             data_index, di_path = self.update_data_index()

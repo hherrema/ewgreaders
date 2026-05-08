@@ -14,6 +14,7 @@ import warnings
 class ADCPProcessor:
     MD_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_md.json'
     DT_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}_dt.csv'
+    BATHY_PATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/bathymetry.nc'
     DPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/'
     DIPATH = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/mooring.json'
     ADCPS = ['adcp']
@@ -51,7 +52,8 @@ class ADCPProcessor:
         'corr': {'units': 'counts', 'long_name': 'Acoustic signal correlation (beam consistency)'},
         'prcnt_gd': {'units': '%', 'long_name': 'Proportion of acceptable singal returns'}, 
         'rotmat': {'long_name': 'Rotation matrix'},
-        'orientmat': {'long_name': 'Orientation matrix'}
+        'orientmat': {'long_name': 'Orientation matrix'},
+        'serial_id': {'long_name': 'Serial ID'}
     }
 
 
@@ -114,6 +116,34 @@ class ADCPProcessor:
 
         return md
     
+    
+    def get_swiss_coords(self, oom=True):
+        """
+        Parse metadata file for Swiss coordinates of mooring location.
+
+        Parameters
+        ----------
+        oom : bool
+            Toggle to add order of magnitude (2, 1) to (x, y) coordinates.
+
+        Returns
+        -------
+        xsc : int
+            Longitude coordinate.
+        ysc : int
+            Latitude coordinate.
+        """
+        md = self.open_md_file()
+
+        xsc = md['xsc']
+        ysc = md['ysc']
+
+        if oom:
+            xsc = int(xsc + 2e6)
+            ysc = int(ysc + 1e6)
+
+        return xsc, ysc
+    
 
     def get_sensor_type(self):
         """
@@ -149,18 +179,29 @@ class ADCPProcessor:
         raise ValueError(f'{self.serial_id} sensor not found')
     
     
-    def get_total_depth(self):
+    def get_total_depth(self, from_bathy=False):
         """
         Parse metadata file for lake depth at mooring location.
+
+        Parameters
+        ----------
+        from_bathy : bool
+            If True, get total depth from bathymetry file.
         
         Returns
         -------
         total_depth : float
             Lake depth at mooring location.
         """
-        md = self.open_md_file()
+        if from_bathy:
+            bathy = xr.open_dataset(self.BATHY_PATH.formate(lake=self.lake))
+            xsc, ysc = self.get_swiss_coords()
+            total_depth = bathy.sel(xsc=xsc, ysc=ysc).depth.item()
+        else:
+            md = self.open_md_file()
+            total_depth = md['lake_depth']
 
-        return md['lake_depth']
+        return total_depth
     
     
     def get_depth(self, dt=True):
@@ -183,7 +224,7 @@ class ADCPProcessor:
             depth = depth_table[depth_table['serial_id'] == self.serial_id].iloc[0].depth
         else:
             mab = self.get_mab()
-            total_depth = self.get_total_depth()
+            total_depth = self.get_total_depth(from_bathy=True)
             depth = total_depth - mab
 
         return depth
@@ -294,7 +335,7 @@ class ADCPProcessor:
         ds = ds.swap_dims({'range': 'depth'})
 
         # check if ADCP range reaches lake surface or bottom
-        total_depth = self.get_total_depth()
+        total_depth = self.get_total_depth(from_bathy=True)
         if self.orientation == 'up':
             self.surfbot = ds['depth'].min().item() <= 0
         elif self.orientation == 'down':
@@ -338,6 +379,9 @@ class ADCPProcessor:
         ds : xr.Dataset
             ADCP data with attributes.
         """
+        # add serial id coordinate
+        ds = ds.assign_coords(serial_id=self.serial_id)
+
         # data variables
         for var, attrs in self.VAR_ATTRS.items():
             if var in ds:
@@ -350,6 +394,7 @@ class ADCPProcessor:
             'xsc': md['xsc'],
             'ysc': md['ysc'],
             'lake_depth': md['lake_depth'],
+            'bathy_depth': self.get_total_depth(from_bathy=True),
             'deployment': md['deployment'],
             'retrieval':md['retrieval'],
             'sensor': self.sensor,
@@ -366,9 +411,6 @@ class ADCPProcessor:
         md_xr.update(ds_attrs)
 
         ds = ds.assign_attrs(md_xr)
-
-        # add serial id coordinate
-        ds = ds.assign_coords(serial_id=self.serial_id)
 
         return ds
         
@@ -411,7 +453,7 @@ class ADCPProcessor:
         """
         dist_sidelobe = self.depth * (1 - np.cos(ds.attrs['beam_angle'] * np.pi / 180))
 
-        return ds.where(ds.range >= dist_sidelobe, drop=True)
+        return ds.where(ds.depth >= dist_sidelobe, drop=True)
     
     
     def qa_interface_bottom(self, ds):
@@ -428,10 +470,10 @@ class ADCPProcessor:
         ds : xr.Dataset
             ADCP data with bottom interface filtered.
         """
-        total_depth = self.get_total_depth()
+        total_depth = self.get_total_depth(from_bathy=True)
         dist_sidelobe = (total_depth - self.depth) * (1 - np.cos(ds.attrs['beam_angle'] * np.pi / 180))
         
-        return ds.where(ds.range <= total_depth - dist_sidelobe, drop=True)
+        return ds.where(ds.depth <= total_depth - dist_sidelobe, drop=True)
     
 
     def qa_min_corr(self, ds, corr_thresh=64):
@@ -567,7 +609,7 @@ class ADCPProcessor:
         if not self.surfbot and not surfbot_toggle:
             return ds
         
-        echo_amp_diff = ds.amp.diff(dim='range')
+        echo_amp_diff = ds.amp.diff(dim='depth')
         ead1 = echo_amp_diff.sel(beam=1) <= ead_thresh
         ead2 = echo_amp_diff.sel(beam=2) <= ead_thresh
         ead3 = echo_amp_diff.sel(beam=3) <= ead_thresh
@@ -607,6 +649,16 @@ class ADCPProcessor:
     def quality_assurance(self, ds):
         """
         Run quality assurance on L1 ADCP data.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            L1 ADCP data.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            Quality assured (L2) ADCP data.
         """
         ds = ds.where(~ds['builtin_test_fail'], drop=True)   # built-in qa test
         ds = self.qa_interface_surface(ds)

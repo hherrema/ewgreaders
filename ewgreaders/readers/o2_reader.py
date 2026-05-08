@@ -1,184 +1,69 @@
 ### Class for reading Oxygen logger data
 
 # imports
-import xarray as xr
-import numpy as np
-import pandas as pd
-import pyrsktools as rsk
-import json
 from glob import glob
+import xarray as xr
 
-from .mooring_reader import MooringReader
 
-
-class O2Reader(MooringReader):
-    COLS_DROP_MINIDOT = ['Unix Timestamp', 'Coordinated Universal Time', 'Battery', 'Q']
-    COLS_MAP_MINIDOT = {
-        'UTC_Date_&_Time': 'time', 
-        'Temperature': 'temp', 
-        'Dissolved Oxygen': 'd_oxygen_conc', 
-        'Dissolved Oxygen Saturation': 'd_oxygen_sat'
-    }
-    COLS_MAP_RBR_DO = {'timestamp': 'time', 'dissolved_o2_saturation': 'd_oxygen_sat'}
+class O2Reader():
+    DPATH_L2 = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/L2/'
     
-    def __init__(self, serial_id, lake, location, year, date, datalakes=False):
+    def __init__(self, lake, year, date, location, serial_id):
         """
         Initialize O2Reader object.
 
         Parameters
         ----------
-        serial_id : str
-            Serial number of oxygen logger.
         lake : str
             Lake where oxygen logger is deployed.
-        location : str
-            Location code within lake of oxygen logger deployment.
+        
         year : str
             Year of oxygen logger retrieval. 
         date : str
             Date (YYYYMMDD) of oxygen logger retrieval.
-        datalakes : bool
-            Toggle whether to read from Eawag drive or DataLakes.
+        location : str
+            Location code within lake of oxygen logger deployment.
+        serial_id : str
+            Serial number of oxygen logger.
         """
-        super().__init__(lake, location, year, date, datalakes)
+        self.lake = lake
+        self.year = year
+        self.date = date
+        self.location = location
         self.serial_id = serial_id
-        self.sensor = self.get_sensor_type()
-        self.mab = self.get_mab()
-        self.depth = self.set_depth()
-
-
-    def get_mab(self):
-        """
-        Parse metadata file for meters above bottom of oxygen logger.
-
-        Returns
-        -------
-        mab : float
-            Meters above bottom for oxygen logger.
-        """
-        instruments = self.md['instruments']
-        for i in instruments:
-            if i['serial_id'] == self.serial_id and i['instrument'] in self.OXYGEN_LOGGERS:
-                return i['mab']
-            
-        return np.nan
     
 
-    def set_depth(self):
-        """
-        Set depth of oxygen logger.
+    # ---------- Navigation ----------
 
-        Returns
-        -------
-        depth : float
-            Depth below water surface of oxygen logger.
+    def locate_file_L2(self):
         """
-        return self.total_depth - self.mab
-    
-
-    def get_sensor_type(self):
-        """
-        Parse metadata file for sensor type.
-
-        Returns
-        -------
-        sensor : str
-            Type of oxygen logger.
-        """
-        instruments = self.md['instruments']
-        for i in instruments:
-            if i['serial_id'] == self.serial_id and i['instrument'] in self.OXYGEN_LOGGERS:
-                return i['instrument']
-            
-        return None
-    
-
-    def get_fpath_L0(self):
-        """
-        Get file path to raw (LO) data.
-
-        Returns
-        -------
-        fpath_L0 : str
-            Path to raw (L0) data.
-        """
-        if self.sensor == 'minidot':
-            fpath_L0 = f'{self.dpath_L0}/7450-{self.serial_id}/Cat.txt'
-        elif self.sensor == 'rbr_do':
-            fpath_L0 = glob(f'{self.dpath_L0}/*{self.serial_id}*.rsk')[0]
-        else:
-            raise NotImplementedError("Only minidot and rbr_do sensors are handled.")
+        Locate file with processed (L2) oxygen logger data.
         
-        return fpath_L0
+        Returns
+        -------
+        fpath_L2 : str
+            Path to L2 data file.
+        """
+        dpath_L2 = self.DPATH_L2.format(lake=self.lake, year=self.year, date=self.date, location=self.location)
+        fpaths = glob(f'{dpath_L2}/*{self.serial_id}_L2.nc')
+
+        if len(fpaths) != 1:
+            raise FileNotFoundError('Could not locate single L2 file.')
+        
+        return fpaths[0]
     
 
-    def load_from_L0(self):
+    # ---------- Reading ----------
+    
+    def load(self):
         """
-        Load raw (L0) oxygen logger data into xarray Dataset.
+        Load processed (L2) oxygen logger data.
 
         Returns
         -------
         ds : xr.Dataset
-            Dataset of data recorded by oxygen logger.
+            Oxygen logger data.
         """
-        self.fpath_L0 = self.get_fpath_L0()
-        if self.sensor == 'minidot':
-            data = self.parse_minidot_L0()
-        elif self.sensor == 'rbr_do':
-            data = self.parse_RBR_DO_L0()
-        else:
-            raise NotImplementedError("Only minidot and rbr_do sensors are handled.")
-        
-        data = data.set_index('time')
-        ds = xr.Dataset.from_dataframe(data)
-        ds = ds.assign_coords(depth=self.depth, serial_id=self.serial_id)
+        fpath_L2 = self.locate_file_L2()
 
-        return ds
-    
-    
-    def parse_minidot_L0(self):
-        """
-        Parse raw (L0) data from Minidot oxygen logger.
-
-        Returns
-        -------
-        data : pd.DataFrame
-            Data from Minidot oxygen logger.
-        """
-        with open(self.fpath_L0, 'r') as f:
-            lines = [x[:-1] for x in f if len(x.split(',')) > 1]
-
-        # extract colum names
-        cols = [x.lstrip(' ') for x in lines[0].split(',')]
-
-        data = []
-        for line in lines[2:]:
-            data.append([x.lstrip(' ') for x in line.split(',')])
-        data = pd.DataFrame(data, columns=cols)
-
-        data = data.drop(self.COLS_DROP_MINIDOT, axis=1)
-        data = data.rename(columns=self.COLS_MAP_MINIDOT)
-        data['time'] = pd.to_datetime(data['time'])
-        data['temp'] = data['temp'].astype(float)
-        data['d_oxygen_conc'] = data['d_oxygen_conc'].astype(float)
-        data['d_oxygen_sat'] = data['d_oxygen_sat'].astype(float)
-
-        return data
-    
-
-    def parse_RBR_DO_L0(self):
-        """
-        Parse raw (L0) data from RBR_DO oxygen logger.
-
-        Returns
-        -------
-        data : pd.DataFrame
-            Data from RBR_DO oxygen logger.
-        """
-        with rsk.RSK(self.fpath_L0) as f:
-            f.readdata()
-            data = pd.DataFrame(f.data)
-
-        data = data.rename(columns=self.COLS_MAP_RBR_DO)
-
-        return data
+        return xr.open_dataset(fpath_L2)
