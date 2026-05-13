@@ -8,7 +8,7 @@ import xarray as xr
 class O2Reader():
     DPATH_L2 = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/L2/'
     
-    def __init__(self, lake, year, date, location, serial_id):
+    def __init__(self, lake, date, location, serial_id):
         """
         Initialize O2Reader object.
 
@@ -16,19 +16,16 @@ class O2Reader():
         ----------
         lake : str
             Lake where oxygen logger is deployed.
-        
-        year : str
-            Year of oxygen logger retrieval. 
         date : str
-            Date (YYYYMMDD) of oxygen logger retrieval.
+            Date (YYYY-MM-DD) of oxygen logger retrieval.
         location : str
             Location code within lake of oxygen logger deployment.
         serial_id : str
             Serial number of oxygen logger.
         """
         self.lake = lake
-        self.year = year
-        self.date = date
+        self.year = str(date.year)
+        self.date = date.strftime('%Y%m%d')
         self.location = location
         self.serial_id = serial_id
     

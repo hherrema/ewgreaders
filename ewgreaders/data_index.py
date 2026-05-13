@@ -22,4 +22,11 @@ def get_data_index(lake, dtype):
     """
     di_path = f'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{dtype}.json'
 
-    return pd.read_json(di_path).sort_values(by=['date', 'time'], ascending=True).reset_index(drop=True)
+    if dtype == 'ctd':
+        data_index = pd.read_json(di_path).sort_values(by=['date', 'time'], ascending=True).reset_index(drop=True)
+    elif dtype == 'mooring':
+        data_index = pd.read_json(di_path).sort_values(by=['date', 'location', 'depth'], ascending=True).reset_index(drop=True)
+    else:
+        raise ValueError('Only ctd and mooring data indices implemented.')
+    
+    return data_index

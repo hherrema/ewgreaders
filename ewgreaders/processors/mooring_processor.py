@@ -142,7 +142,7 @@ class MooringProcessor:
             Lake depth at mooring location.
         """
         if from_bathy:
-            bathy = xr.open_dataset(self.BATHY_PATH.formate(lake=self.lake))
+            bathy = xr.open_dataset(self.BATHY_PATH.format(lake=self.lake))
             total_depth = bathy.sel(xsc=self.xsc, ysc=self.ysc).depth.item()
         else:
             md = self.open_md_file()

@@ -16,7 +16,7 @@ class MooringReader:
     THERMISTORS = ['rbr_temp', 'rbr_duet']
     OXYGEN_LOGGERS = ['minidot', 'rbr_do']
 
-    def __init__(self, lake, year, date, location):
+    def __init__(self, lake, date, location):
         """
         Initialize MooringReader object.
 
@@ -24,16 +24,14 @@ class MooringReader:
         ----------
         lake : str
             Lake where mooring is deployed.
-        year : str
-            Year of mooring retrieval.
         date : str
-            Date (YYYYMMDD) of mooring retrieval.
+            Date (YYYY-MM-DD) of mooring retrieval.
         location : str
             Location code within lake of mooring deployment.
         """
         self.lake = lake
-        self.year = year
-        self.date = date
+        self.year = str(date.year)
+        self.date = date.strftime('%Y%m%d')
         self.location = location
 
         self.md_file = self.locate_md_file()
@@ -134,7 +132,7 @@ class MooringReader:
             Lake depth at mooring location.
         """
         if from_bathy:
-            bathy = xr.open_dataset(self.BATHY_PATH.formate(lake=self.lake))
+            bathy = xr.open_dataset(self.BATHY_PATH.format(lake=self.lake))
             total_depth = bathy.sel(xsc=self.xsc, ysc=self.ysc).depth.item()
         else:
             md = self.open_md_file()

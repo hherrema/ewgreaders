@@ -8,7 +8,7 @@ import xarray as xr
 class ThermistorReader():
     DPATH_L2 = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/L2/'
 
-    def __init__(self, lake, year, date, location, serial_id):
+    def __init__(self, lake, date, location, serial_id):
         """
         Initialize ThermistorReader object.
 
@@ -16,18 +16,16 @@ class ThermistorReader():
         ----------
         lake : str
             Lake where thermistor is deployed.
-        year : str
-            Year of thermistor retrieval. 
         date : str
-            Date (YYYYMMDD) of thermistor retrieval.
+            Date (YYYY-MM-DD) of thermistor retrieval.
         location : str
             Location code within lake of thermistor deployment.
         serial_id : str
             Serial number of thermistor.
         """
         self.lake = lake
-        self.year = year
-        self.date = date
+        self.year = str(date.year)
+        self.date = date.strftime('%Y%m%d')
         self.location = location
         self.serial_id = serial_id
 

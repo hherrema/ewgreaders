@@ -176,7 +176,7 @@ class O2Processor:
             Lake depth at mooring location.
         """
         if from_bathy:
-            bathy = xr.open_dataset(self.BATHY_PATH.formate(lake=self.lake))
+            bathy = xr.open_dataset(self.BATHY_PATH.format(lake=self.lake))
             xsc, ysc = self.get_swiss_coords()
             total_depth = bathy.sel(xsc=xsc, ysc=ysc).depth.item()
         else:
@@ -514,7 +514,53 @@ class O2Processor:
         di_path : str
             File path to mooring data index.
         """
-        raise NotImplementedError
+        root = f'Q:/Messdaten/Aphys_Hypothesis_data/{self.lake}/'
+        years = [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]
+
+        di = []
+        for yr in years:
+            root_yr = f'Q:/Messdaten/Aphys_Hypothesis_data/{self.lake}/{yr}/Mooring/'
+
+            dates = os.listdir(root_yr)
+            for dt in dates:
+                root_date = os.path.join(root_yr, dt)
+
+                md_files = glob(f'{root_date}/*_md.json')
+                for md_file in md_files:
+                    loc = os.path.basename(md_file).split('_md')[0]
+                    dt_path = self.DT_PATH.format(lake=self.lake, year=yr, date=dt, location=loc)
+                    
+                    # REMOVE ONCE DEPTH TABLES MADE FOR ALL DEPLOYMENTS
+                    if not os.path.exists(dt_path):
+                        continue
+
+                    depth_table = pd.read_csv(dt_path, dtype={'serial_id': str})
+                    dp_L2 = os.path.join(self.DPATH.format(lake=self.lake, year=yr, date=dt, location=loc), 'L2')
+                    
+                    for fp in os.listdir(dp_L2):
+                        serial_id = fp.split('_L2')[0].split('_')[-1]
+                        dt_sel = depth_table[depth_table['serial_id'] == serial_id].iloc[0]
+                        with open(md_file, 'r') as f:
+                            md = json.load(f)
+
+                        di.append({
+                            'lake': self.lake,
+                            'date': pd.to_datetime(dt),
+                            'location': loc,
+                            'xsc': md['xsc'],
+                            'ysc': md['ysc'],
+                            'deploy': pd.to_datetime(md['deployment']),
+                            'retrieve': pd.to_datetime(md['retrieval']),
+                            'sensor': dt_sel['instrument'],
+                            'serial_id': serial_id,
+                            'depth': dt_sel['depth']
+                        })
+
+        di_path = self.DIPATH.format(lake=self.lake)
+        with open(di_path, 'w') as f:
+            json.dump(di, f, indent=2)
+
+        return pd.DataFrame(di).sort_values(by=['date', 'location', 'depth'], ascending=True).reset_index(drop=True), di_path
     
 
     # ---------- Pipeline ----------

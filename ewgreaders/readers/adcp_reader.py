@@ -7,7 +7,7 @@ from glob import glob
 class ADCPReader():
     DPATH_L2 = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/L2/'
 
-    def __init__(self, lake, year, date, location, serial_id):
+    def __init__(self, lake, date, location, serial_id):
         """
         Initialize ADCPReader object.
 
@@ -15,18 +15,16 @@ class ADCPReader():
         ----------
         lake : str
             Lake where ADCP is deployed.
-        year : str
-            Year of ADCP retrieval.
         date : str
-            Date (YYYYMMDD) of ADCP retrieval.
+            Date (YYYY-MM-DD) of ADCP retrieval.
         location : str
             Location code within lake of ADCP deployment.
         serial_id : str
             Serial number of ADCP.
         """
         self.lake = lake
-        self.year = year
-        self.date = date
+        self.year = str(date.year)
+        self.date = date.strftime('%Y%m%d')
         self.location = location
         self.serial_id = serial_id
 
