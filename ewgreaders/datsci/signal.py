@@ -6,30 +6,25 @@ import numpy as np
 import scipy
 
 
-def rolling_average(data, depth, ra_window):
+def rolling_average_z(da, ra_window):
     """
-    Compute rolling average.
+    Compute rolling average along depth dimension.
 
     Parameters
     ----------
-    data : array_like
-        Data variable to compute rolling average of.
-    depth : array_like
-        Depth below water surface.
+    da : xr.DataArray
+        Data to compute rolling average of.
     ra_window : float
-        Depth window for rolling average.
+        Depth window for rolling average [m].
 
     Returns
     -------
-    data_ra : np.array
+    da_ra : xr.DataArray
         Rolling average of data.
     """
-    data_ra = []
-    for d in depth:
-        mask = (depth >= d - (ra_window/2)) & (depth <= d + (ra_window/2))
-        data_ra.append(np.mean(data[mask]))
+    da_ra = [da.sel(depth=slice(d - (ra_window/2), d + (ra_window/2))).mean() for d in da.depth]
 
-    return np.array(data_ra)
+    return xr.DataArray(da_ra, dims=da.dims, coords=da.coords, name=da.name)
 
 
 def savitzky_golay(arr):
@@ -52,14 +47,14 @@ def savitzky_golay(arr):
     return scipy.signal.savgol_filter(arr, window, polyorder, mode='nearest')
 
 
-def order_profile(var, surfmax):
+def order_profile(da, surfmax):
     """
     Order profile.  Stable so repeat values maintain original order.
 
     Parameters
     ----------
-    var : xr.DataArray
-        Variable profile to sort.
+    da : xr.DataArray
+        Profile to sort.
     surfmax : bool
         True if var is max at surface, False if var is max at bottom.
     """
@@ -68,11 +63,11 @@ def order_profile(var, surfmax):
     else:
         s = 1
 
-    var_ascending = var*s
-    idx = var_ascending.argsort(kind='mergesort').values
-    var_sorted = var_ascending.isel(depth=idx)
+    da_ascending = da*s
+    idx = da_ascending.argsort(kind='mergesort').values
+    da_sorted = da_ascending.isel(depth=idx)
 
-    return var_sorted*s
+    return da_sorted*s
 
 
 def valid_depths(ds, thresh):
