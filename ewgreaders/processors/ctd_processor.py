@@ -8,6 +8,7 @@ import xarray as xr
 import warnings
 import gsw as sw
 from glob import glob
+import math
 
 
 class CTDProcessor:
@@ -477,7 +478,13 @@ class CTDProcessor:
             Depth below water surface [m].
         """
         pressure_adjusted = press - air_pressure
-        depth = 1e4 * pressure_adjusted / (rho * sw.grav(lat, pressure_adjusted))
+
+        if math.isnan(lat):
+            g = 9.81
+        else:
+            g = sw.grav(lat, pressure_adjusted)
+
+        depth = 1e4 * pressure_adjusted / (rho * g)
 
         return depth
     

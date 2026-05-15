@@ -430,7 +430,7 @@ def schmidt_stability(ds, bathy):
 
 # ---------- ADCP ----------
 
-def locate_interface_bounds(depth, mxsc, mysc, angle_rad, bathy):
+def locate_interface_bounds(depth, mxsc, mysc, angle_rad, bathy, oom=True):
     """
     Locate land boundaries of flux interface.
 
@@ -448,6 +448,8 @@ def locate_interface_bounds(depth, mxsc, mysc, angle_rad, bathy):
         Angle of interface in radians.
     bathy : xr.Dataset
         Lake bathymetry.
+    oom : bool
+        Toggle to add order of magnitude (2, 1) to (x, y) coordinates.
 
     Returns
     -------
@@ -463,6 +465,10 @@ def locate_interface_bounds(depth, mxsc, mysc, angle_rad, bathy):
         Distance between boundary points.
 
     """
+    if oom:
+            mxsc = int(mxsc + 2e6)
+            mysc = int(mysc + 1e6)
+
     # positive direction
     xsc1, ysc1 = mxsc, mysc
     while xsc1 < bathy.xsc.max().item() and ysc1 < bathy.ysc.max().item():
@@ -525,8 +531,8 @@ def volume_flux(ds, depth, mxsc, mysc, angle_deg, bathy):
     h = ds.attrs['cell_size']
     da = distance * h               # area of cross-section rectangle [m^2]
 
-    u = ds.vel.sel(dir='E').sel(range=depth, method='nearest')
-    v = ds.vel.sel(dir='N').sel(range=depth, method='nearest')
+    u = ds.vel.sel(dir='E').sel(depth=depth, method='nearest')
+    v = ds.vel.sel(dir='N').sel(depth=depth, method='nearest')
 
     u_orth = u * (-1) * np.sin(angle_rad)
     v_orth = v * np.cos(angle_rad)

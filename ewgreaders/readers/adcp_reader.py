@@ -2,7 +2,7 @@
 
 # imports
 import xarray as xr
-from glob import glob
+import os
 
 class ADCPReader():
     DPATH_L2 = 'Q:/Messdaten/Aphys_Hypothesis_data/{lake}/{year}/Mooring/{date}/{location}/L2/'
@@ -41,12 +41,12 @@ class ADCPReader():
             Path to L2 data file.
         """
         dpath_L2 = self.DPATH_L2.format(lake=self.lake, year=self.year, date=self.date, location=self.location)
-        fpaths = glob(f'{dpath_L2}/*{self.serial_id}_L2.nc')
+        fpath_L2 = f'{dpath_L2}/adcp_{self.serial_id}_L2.nc'
 
-        if len(fpaths) != 1:
-            raise FileNotFoundError('Could not locate single L2 file.')
+        if not os.path.exists(fpath_L2):
+            raise FileNotFoundError('Could not locate L2 file.')
         
-        return fpaths[0]
+        return fpath_L2
     
 
     # ---------- Reading ----------

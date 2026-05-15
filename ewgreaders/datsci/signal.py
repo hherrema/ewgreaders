@@ -95,13 +95,5 @@ def valid_depths(ds, thresh):
         Filtered data with only valid depths.
     """
     valid_depths = ds.notnull().mean(dim='time')
-
-    # ADCP data has range coordinate
-    if 'range' in ds.coords:
-        ds = ds.sel(range=valid_depths >= thresh)
-
-    # thermistor and oxygen logger data has depth coordinate
-    else:
-        ds = ds.sel(depth=valid_depths >= thresh)
-
-    return ds
+    
+    return ds.sel(depth=valid_depths >= thresh)
