@@ -52,7 +52,7 @@ def savitzky_golay(arr):
     return scipy.signal.savgol_filter(arr, window, polyorder, mode='nearest')
 
 
-def order_profile(var, depth, descending):
+def order_profile(var, surfmax):
     """
     Order profile.  Stable so repeat values maintain original order.
 
@@ -60,22 +60,19 @@ def order_profile(var, depth, descending):
     ----------
     var : xr.DataArray
         Variable profile to sort.
-    depth : xr.DataArray
-        Depth below water surface, increasing.
-    descending : bool
-        True if var decreases with depth, False if var increases with depth.
+    surfmax : bool
+        True if var is max at surface, False if var is max at bottom.
     """
-    if descending:
+    if surfmax:
         s = -1
     else:
         s = 1
 
     var_ascending = var*s
     idx = var_ascending.argsort(kind='mergesort').values
-    var_sorted = var_ascending.isel(time=idx)
-    depth_sorted = depth.isel(time=idx)
+    var_sorted = var_ascending.isel(depth=idx)
 
-    return var_sorted*s, depth_sorted
+    return var_sorted*s
 
 
 def valid_depths(ds, thresh):

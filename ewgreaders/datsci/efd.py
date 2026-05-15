@@ -30,20 +30,18 @@ def brunt_vaisala_frequency(ds, sort=True):
     """
     g = 9.81
 
-    # mask for valid depths, quality checked temperature and conductivity (salinity)
-    mask = (ds['depth'].notnull()) & (ds['Temp_qual'] == 0) & (ds['Cond_qual'] == 0)
-    depth = ds['depth'][mask]
-    rho = ds['rho'][mask]
+    depth = ds['depth']
+    rho = ds['rho']
 
     # sort density profile, use original depth
     if sort:
-        rho, _ = order_profile(rho, depth, False)
+        rho = order_profile(rho, False)
+        rho = rho.assign_coords(depth=depth)
 
-    drhodz = np.gradient(rho, depth)
-    N2 = (g/rho) * drhodz
+    drhodz = rho.differentiate('depth')
+    N2 = (g/rho.values) * drhodz          # use midpoint depths from derivative
 
-    # return N2.rename('N2').assign_coords(depth=depth)
-    return xr.DataArray(N2.values, dims=["time"], coords={"time": depth.time, "depth": ("time", depth.values)}, name="N2")
+    return N2.rename('N2')
 
 
 # ---------- ADCP ---------- #
