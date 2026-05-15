@@ -6,7 +6,7 @@ import numpy as np
 import scipy
 
 
-def rolling_average_z(da, ra_window):
+def rolling_average_z(da, ra_window=1):
     """
     Compute rolling average along depth dimension.
 
@@ -25,6 +25,29 @@ def rolling_average_z(da, ra_window):
     da_ra = [da.sel(depth=slice(d - (ra_window/2), d + (ra_window/2))).mean() for d in da.depth]
 
     return xr.DataArray(da_ra, dims=da.dims, coords=da.coords, name=da.name)
+
+
+def binned_average_z(da, bin_size=1):
+    """
+    Compute binned average along depth dimension.
+
+    Parameters
+    ----------
+    da : xr.DataArray
+        Data to compute binned average of.
+    bin_size : float
+        Depth bin size [m].
+
+    Returns
+    -------
+    da_ba : xr.DataArray
+        Binned average of data.
+    """
+    bins = np.arange(0, da.depth.max() + bin_size, bin_size)
+
+    da_ba = da.groupby_bins('depth', bins, labels=bins[:-1] + bin_size/2).mean()
+    
+    return da_ba.rename({'depth_bins': 'depth'})
 
 
 def savitzky_golay(arr):
