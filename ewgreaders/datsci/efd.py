@@ -3,7 +3,7 @@
 # imports
 import xarray as xr
 import numpy as np
-from .signal import order_profile
+from .signal import order_profile, rolling_average_z
 
 
 # ---------- Utility ---------- #
@@ -11,7 +11,7 @@ from .signal import order_profile
 
 # ---------- CTD ---------- #
 
-def brunt_vaisala_frequency(ds, sort=True):
+def brunt_vaisala_frequency(rho):
     """
     Calculate Brunt-Väisälä (buoyancy) frequency.
     N^2 = (g / ρ) * (dρ/dz)
@@ -19,10 +19,8 @@ def brunt_vaisala_frequency(ds, sort=True):
 
     Parameters
     ----------
-    ds : xr.Dataset
-        CTD data.
-    sort : bool
-        If True, sort profile to monotonic order.
+    rho : xr.DataArray
+        Density data from CTD profile.
 
     Returns
     -------
@@ -30,19 +28,10 @@ def brunt_vaisala_frequency(ds, sort=True):
     """
     g = 9.81
 
-    depth = ds['depth']
-    rho = ds['rho']
-
-    # sort density profile, use original depth
-    if sort:
-        rho = order_profile(rho, False)
-        rho = rho.assign_coords(depth=depth)
-
     drhodz = rho.differentiate('depth')
     N2 = (g/rho.values) * drhodz          # use midpoint depths from derivative
 
     return N2.rename('N2')
-
 
 # ---------- ADCP ---------- #
 
@@ -128,8 +117,8 @@ def vertical_shear(ds):
     v = ds.vel.sel(dir='N')
 
     # vertical derivatives of horizontal velocity
-    dudz = u.differentiate('range')
-    dvdz = v.differentiate('range')
+    dudz = u.differentiate('depth')
+    dvdz = v.differentiate('depth')
 
     S2 = dudz**2 + dvdz**2
 

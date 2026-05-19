@@ -7,7 +7,7 @@ import pandas as pd
 import scipy
 import math
 
-import signal
+from .signal import rolling_average_z
 
 
 # ---------- Utility ---------- #
@@ -226,74 +226,58 @@ def epi_meta_hypolimnion(ds):
     raise NotImplementedError
 
 
-def isotherm(ds, iso_t):
+def isotherm(temp, iso_t):
     """
-    Locate isotherm depth.
+    Locate isotherm depths.  Calculate as crossing of iso_t.
 
     Parameters
     ----------
-    ds : xr.Dataset
-        Single profile CTD data.
+    temp : xr.DataArray
+        Temperature profile from CTD.
     iso_t : float
-        Isotherm temperature.
+        Isotherm temperature [°C].
 
     Returns
     -------
-    iso_z : float
-        Isotherm depth.
+    iso_z : np.array
+        Isotherm depths [m].
     """
-    # mask for valid depths, quality checked temperature
-    mask = (ds['depth'].notnull()) & (ds['Temp_qual'] == 0)
-    depth = ds['depth'][mask]
-    temp = ds['Temp'][mask]
+    depth = temp['depth']
 
-    # locate shallowest crossing of isotherm temperature
-    try:
-        idxl = np.where(temp < iso_t)[0][0]
-        idxu = np.where(temp > iso_t)[0][-1]
-        idx = round((idxl + idxu)/2)
-        iso_z = depth[idx].item()
-    
-    # temperature outside of range of observed values
-    except IndexError:
-        iso_z = np.nan
+    # baseline correct by iso_t
+    temp_bc = temp - iso_t
 
-    return iso_z
+    # find 0 crossing (adjacent measurements with opposite sign)
+    mask = (temp_bc * temp_bc.shift(depth=1, fill_value=0)) < 0
+
+    return depth.where(mask, drop=True).values
 
 
-def isopycnal(ds, iso_rho):
+def isopycnal(rho, iso_rho):
     """
-    Locate isopycnal depth.
+    Locate isopycnal depths.  Calculate as crossing of iso_rho.
 
     Parameters
     ----------
-    ds : xr.Dataset
-        Single profile CTD data.
+    rho : xr.DataArray
+        Density profile from CTD.
     iso_rho : float
-        Isopycnal density.
+        Isoycnal density [kg/m^3].
 
     Returns
     -------
-    iso_z : float
-        Isopycnal depth.
+    iso_z : np.array
+        Isopycnal depths [m].
     """
-    # mask for valid depths, quality checked temperature and conductivity (salinity)
-    mask = (ds['depth'].notnull()) & (ds['Temp_qual'] == 0) & (ds['Cond_qual'] == 0)
-    depth = ds['depth'][mask]
-    rho = ds['rho'][mask]
+    depth = rho['depth']
 
-    # locate shallowest crossing of isopycnal temperature
-    try:
-        idxl = np.where(rho > iso_rho)[0][0]
-        idxu = np.where(rho < iso_rho)[0][-1]
-        idx = round((idxl + idxu)/2)
-        iso_z = depth[idx].item()
+    # baseline correct by iso_rho
+    rho_bc = rho - iso_rho
 
-    # density outside of range of observed values
-    except IndexError:
-        iso_z = np.nan
+    # find 0 crossing (adjacent measurements with opposite sign)
+    mask = (rho_bc * rho_bc.shift(depth=1, fill_value=0)) < 0
 
-    return iso_z
+    return depth.where(mask, drop=True).values
 
 
 def transect_min_dox(datasets):
