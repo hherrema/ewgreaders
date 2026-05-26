@@ -6,7 +6,14 @@ import numpy as np
 import scipy
 
 
+# ---------- Time Series ---------- #
+
+def rolling_average_t():
+    raise NotImplementedError
+
+
 # ---------- Depth Profiles ---------- #
+
 def rolling_average_z(da, ra_window=1):
     """
     Compute rolling average along depth dimension.
@@ -51,7 +58,7 @@ def binned_average_z(da, bin_size=1):
     return da_ba.rename({'depth_bins': 'depth'})
 
 
-def order_profile(da, surfmax, reassign_depth):
+def order_profile(da, surfmax, reassign_depth=False):
     """
     Order profile.  Stable so repeat values maintain original order.
 
@@ -110,6 +117,8 @@ def valid_depths(ds, thresh):
 
     return ds.sel(depth=prop_valid >= thresh)
 
+
+# ---------- Misc ---------- #
 
 def savitzky_golay(arr):
     """

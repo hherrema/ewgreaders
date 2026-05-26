@@ -498,12 +498,12 @@ class ThermistorProcessor:
 
                         di.append({
                             'lake': self.lake,
-                            'date': pd.to_datetime(dt),
+                            'date': f'{dt[:4]}-{dt[4:6]}-{dt[6:]}',
                             'location': loc,
                             'xsc': md['xsc'],
                             'ysc': md['ysc'],
-                            'deploy': pd.to_datetime(md['deployment']),
-                            'retrieve': pd.to_datetime(md['retrieval']),
+                            'deploy': "-".join(md['deployment'].split('.')[::-1]),
+                            'retrieve': "-".join(md['retrieval'].split('.')[::-1]),
                             'sensor': dt_sel['instrument'],
                             'serial_id': serial_id,
                             'depth': dt_sel['depth']

@@ -304,7 +304,6 @@ class O2Processor:
         data : pd.DataFrame
             Data from RBR_DO oxygen logger.
         """
-        raise NotImplementedError
         with rsk.RSK(fpath_L0) as f:
             f.readdata()
             data = pd.DataFrame(f.data)
@@ -362,6 +361,14 @@ class O2Processor:
 
         return ds.rename_vars(vars_map)
     
+
+    @staticmethod
+    def dissolved_oxygen_concentration(do2_sat, slope=0.121):
+        """
+        Calculate dissolved oxygen concentration for saturation.
+        Slope calculated from linear regression of do2_sat vs. do2_conc from CTD data.
+        """
+        raise NotImplementedError
     
     def assign_attributes(self, ds):
         """
@@ -545,12 +552,12 @@ class O2Processor:
 
                         di.append({
                             'lake': self.lake,
-                            'date': pd.to_datetime(dt),
+                            'date': f'{dt[:4]}-{dt[4:6]}-{dt[6:]}',
                             'location': loc,
                             'xsc': md['xsc'],
                             'ysc': md['ysc'],
-                            'deploy': pd.to_datetime(md['deployment']),
-                            'retrieve': pd.to_datetime(md['retrieval']),
+                            'deploy': "-".join(md['deployment'].split('.')[::-1]),
+                            'retrieve': "-".join(md['retrieval'].split('.')[::-1]),
                             'sensor': dt_sel['instrument'],
                             'serial_id': serial_id,
                             'depth': dt_sel['depth']
@@ -565,7 +572,7 @@ class O2Processor:
 
     # ---------- Pipeline ----------
 
-    def process(self, update=False):
+    def process(self, update=True):
         """
         Process raw (L0) oxygen logger data.  Convert to xarray and write to .nc (L1).
         Run quality assurance and write to .nc (L2).

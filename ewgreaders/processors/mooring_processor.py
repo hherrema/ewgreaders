@@ -252,7 +252,7 @@ class MooringProcessor:
         fpaths = glob(f'{self.dpath_L0}/*{serial_id}*.rsk')
         
         if len(fpaths) != 1:
-            raise IndexError(f'Could not find single data file for {serial_id}.')
+            raise FileNotFoundError(f'Could not find single data file for {serial_id}.')
         
         return fpaths[0]
     
@@ -274,7 +274,7 @@ class MooringProcessor:
         fpaths = glob(f'{self.dpath_L0}/*{serial_id}*.000')
         
         if len(fpaths) != 1:
-            raise IndexError(f'Could not find single data file for {serial_id}.')
+            raise FileNotFoundError(f'Could not find single data file for {serial_id}.')
         
         return fpaths[0]
 
@@ -394,13 +394,16 @@ class MooringProcessor:
         depth_table = []
         for i in instruments:
             if i['instrument'] == 'rbr_duet':
-                ds = self.parse_L0_rbr_duet(i['serial_id'])
-                depth_sensor = self.calculate_depth_rbr_duet(ds['pressure'])
-            elif i['instrument'] == 'adcp':
-                ds = self.parse_L0_adcp(i['serial_id'])
                 try:
+                    ds = self.parse_L0_rbr_duet(i['serial_id'])
+                    depth_sensor = self.calculate_depth_rbr_duet(ds['pressure'])
+                except FileNotFoundError:
+                    depth_sensor = np.nan
+            elif i['instrument'] == 'adcp':
+                try:
+                    ds = self.parse_L0_adcp(i['serial_id'])
                     depth_sensor = self.calculate_depth_adcp(ds)
-                except BaseException:
+                except (FileNotFoundError, KeyError):
                     depth_sensor = np.nan
             else:
                 depth_sensor = np.nan
@@ -413,6 +416,7 @@ class MooringProcessor:
             })
 
         depth_table = pd.DataFrame(depth_table)
+        #print(depth_table)
 
         # use sensor values for instruments at same depth (mean is really taking the non-NaN entry)
         depth_table['depth_sensor'] = depth_table.groupby('depth_md')['depth_sensor'].transform('mean')

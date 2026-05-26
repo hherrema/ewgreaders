@@ -33,6 +33,7 @@ def brunt_vaisala_frequency(rho):
 
     return N2.rename('N2')
 
+
 # ---------- ADCP ---------- #
 
 def TKE(ds):
@@ -98,23 +99,23 @@ def froude_number(ds, densimetric=False):
     return Fr.rename('Fr')
 
 
-def vertical_shear(ds):
+def vertical_shear(vel):
     """
     Calculate vertical shear.
     S2 = (du/dz^2) + (dv/dz)^2
 
     Parameters
     ----------
-    ds : xr.Dataset
-        ADCP data.
+    vel : xr.DataArray
+        Velocity data from ADCP.
     
     Returns
     -------
     S2 : xr.DataArray
         Vertical shear timeseries as a function of depth.
     """
-    u = ds.vel.sel(dir='E')
-    v = ds.vel.sel(dir='N')
+    u = vel.sel(dir='E')
+    v = vel.sel(dir='N')
 
     # vertical derivatives of horizontal velocity
     dudz = u.differentiate('depth')
@@ -126,9 +127,24 @@ def vertical_shear(ds):
 
 
 # ---------- CTD + ADCP ----------
-def gradient_richardson_number(ds_adcp):
+
+def gradient_richardson_number(N2, S2):
     """
     Calculate the gradient Richardson number.
     Ri = N^2 / S^2
+
+    Parameters
+    ----------
+    N2 : xr.DataArray
+        Buoyancy frequency calculated from CTD profile.
+    S2 : xr.DataArray
+        Vertical shear calculated from ADCP data.
+
+    Returns
+    -------
+    Ri : xr.DataArray
+        Gradient Richardson number.
     """
-    raise NotImplementedError
+    Ri = N2.reindex(depth=S2.depth, method='nearest') / S2
+    
+    return Ri.rename('Ri')
