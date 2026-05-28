@@ -70,4 +70,4 @@ class CTDReader():
         if depth_sort:
             ds = ds.drop_duplicates('depth').sortby('depth')
 
-        return ds
+        return ds.load()

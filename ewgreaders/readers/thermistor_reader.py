@@ -62,4 +62,6 @@ class ThermistorReader():
         """
         fpath_L2 = self.locate_file_L2()
 
-        return xr.open_dataset(fpath_L2)
+        ds = xr.open_dataset(fpath_L2)
+
+        return ds.load()
