@@ -1,0 +1,12 @@
+Steps to build Eawag conda environment.
+
+1. conda create --name ewg python=3.13
+2. conda install mamba
+3. mamba install -c conda-forge pandas
+4. mamba install -c conda-forge scipy
+5. mamba install -c conda-forge matplotlib
+6. mamba install -c conda-forge seaborn
+7. mamba install -c conda-forge xarray dask netCDF4 bottleneck
+8. mamba install ipykernel
+9. mamba install -c conda-forge tqdm
+10. pip install -e ewgreaders
