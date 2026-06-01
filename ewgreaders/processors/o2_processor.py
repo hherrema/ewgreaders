@@ -29,7 +29,7 @@ class O2Processor:
     }
     COLS_MAP_RBR_DO = {'timestamp': 'time', 'dissolved_o2_saturation': 'do2_sat'}
     VAR_ATTRS = {
-        'time': {'long_name': 'Coodinated Universal Time (UTC)'},
+        'time': {'long_name': 'Coordinated Universal Time (UTC)'},
         'do2_conc': {'units': 'mg/l', 'long_name': 'Dissolved Oxygen Concentration'},
         'do2_sat': {'units': '%', 'long_name': 'Dissolved Oxygen Saturation'},
         'temp': {'units': '°C', 'long_name': 'Temperature'},
