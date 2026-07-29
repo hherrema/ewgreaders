@@ -18,7 +18,7 @@ class CTDReader():
             Lake where CTD profiles.
         date : str
             Date (YYYY-MM-DD) of CTD profile.
-        fanme : str
+        fname : str
             File name of profile.
         """
         self.lake = lake

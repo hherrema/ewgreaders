@@ -64,4 +64,4 @@ class ADCPReader():
 
         ds = xr.open_dataset(fpath_L2)
 
-        return ds.load()
+        return ds.sortby('depth').load()

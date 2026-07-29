@@ -1,2 +1,2 @@
 # ewgreaders
-Reading and processing Eawag data.
+Reading Eawag data.

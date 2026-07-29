@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 import xarray as xr
 import pandas as pd
+import numpy as np
 
 
 class MooringReader:
@@ -40,8 +41,6 @@ class MooringReader:
 
 
     # ---------- Metadata ----------
-
-
 
     def locate_md_file(self):
         """
@@ -228,4 +227,45 @@ class MooringReader:
 
         return xr.concat(ds_aligned, dim='depth')
     
+
+    @staticmethod
+    def create_adcp_chain(datasets, gap=None, drop=None):
+        """
+        Concatenate individual ADCP data into a single Dataset with all ADCPs.
+
+        Parameters
+        ----------
+        datasets : list
+            List of xarray Datasets from individual ADCPs.
+        gap : np.array
+            Depths of gaps between ADCP ranges.
+        drop : np.array
+            Depth bins with known bad data to remove.
+
+        Returns
+        -------
+        ds_adcp : xr.Dataset
+            Dataset of data recorded by all ADCPs on mooring.
+        """
+        # reindex to shared time axis
+        t0 = max(ds.time.values[0] for ds in datasets)
+        tf = min(ds.time.values[-1] for ds in datasets)
+        time_shared = datasets[0].time.sel(time=slice(t0, tf)).values
+        all_adcp_aligned = [ds.reindex(time=time_shared, method="nearest") for ds in datasets]
+
+        # concatenate datasets and average common range bins
+        ds_adcp = xr.concat(all_adcp_aligned, dim='depth')
+        ds_adcp = ds_adcp.sortby('depth')
+        ds_adcp = ds_adcp.groupby('depth').mean()
+
+        # don't interplate over gap from opposite looking ADCPs in double frame
+        if isinstance(gap, np.ndarray):
+            full_depth = np.sort(np.concatenate([ds_adcp.depth.values, gap]))
+            ds_adcp = ds_adcp.reindex(depth=full_depth)
+
+        # remove known bad depths
+        if isinstance(drop, np.ndarray):
+            ds_adcp = ds_adcp.drop_sel(depth=drop)
+        
+        return ds_adcp
     
